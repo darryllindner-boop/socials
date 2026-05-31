@@ -1,0 +1,100 @@
+# One-command local stack: Postgres + Redis + DB setup + web app + worker.
+#
+#   docker compose up --build
+#
+# Then open http://localhost:3000 (review queue), /analytics, /connections.
+# Uses the offline `mock` LLM by default, so no API keys are needed to try it.
+# To use a real LLM or connect social accounts, set the relevant vars below
+# (or in a .env file next to this compose file).
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: socials
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d socials"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: create the schema (db push — no migration files needed) and seed
+  # the demo brand + initial drafts. Exits when done.
+  migrate:
+    build: .
+    command: sh -c "npx prisma db push --skip-generate --accept-data-loss && npm run db:seed"
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/socials?schema=public"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build: .
+    command: npm run start
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/socials?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      APP_BASE_URL: "http://localhost:3000"
+      REVIEW_TIMEZONE: "Europe/Oslo"
+      POSTING_SLOT_HOURS: "9,13,17"
+      LLM_PROVIDER: "mock"
+      # Dev-only key (32 bytes base64). CHANGE THIS before using real accounts.
+      TOKEN_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      # Optional: real LLM / social app credentials
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      LINKEDIN_CLIENT_ID: ""
+      LINKEDIN_CLIENT_SECRET: ""
+      META_APP_ID: ""
+      META_APP_SECRET: ""
+      X_CLIENT_ID: ""
+      X_CLIENT_SECRET: ""
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: npm run worker
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/socials?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      APP_BASE_URL: "http://localhost:3000"
+      REVIEW_TIMEZONE: "Europe/Oslo"
+      POSTING_SLOT_HOURS: "9,13,17"
+      LLM_PROVIDER: "mock"
+      TOKEN_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

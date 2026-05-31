@@ -57,6 +57,24 @@ logic can be type-checked and executed without installing anything — see below
 
 ## Quickstart
 
+### Option A — one command with Docker (recommended)
+
+Brings up Postgres + Redis, creates the schema, seeds a demo brand, and starts
+both the web app and the worker. Uses the offline `mock` LLM, so **no API keys
+are needed** to try it.
+
+```bash
+docker compose up --build
+```
+
+Then open **http://localhost:3000** — the morning review queue. Also visit
+`/analytics` and `/connections`. To stop and reset: `docker compose down -v`.
+
+To use a real LLM or connect social accounts, set the corresponding variables
+in `docker-compose.yml` (and change `TOKEN_ENCRYPTION_KEY`).
+
+### Option B — run locally with Node
+
 ```bash
 npm install
 cp .env.example .env        # then fill in values (defaults work for local dev with mock LLM)
