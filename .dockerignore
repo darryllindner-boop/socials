@@ -1,0 +1,10 @@
+node_modules
+.next
+.core-dist
+.git
+.github
+npm-debug.log*
+*.tsbuildinfo
+.env
+.env*.local
+README.md

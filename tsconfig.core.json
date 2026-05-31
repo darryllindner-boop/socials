@@ -1,0 +1,19 @@
+{
+  "//": "Standalone config to TYPE-CHECK and COMPILE the dependency-free core (src/core) plus a runtime verification entrypoint. Used by `npm run verify:core` so the core business logic can be validated and executed WITHOUT installing any npm packages (handy in network-isolated environments). Emits CommonJS so plain Node can run it with extensionless relative imports. The DOM lib supplies web globals (fetch/Response/AbortSignal/crypto/console) that Node also provides at runtime; a small ambient declaration covers `process`.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "outDir": "./.core-dist",
+    "rootDir": "./src",
+    "noEmit": false
+  },
+  "include": ["src/core/**/*.ts"],
+  "exclude": ["node_modules"]
+}
