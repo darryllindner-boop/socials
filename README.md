@@ -4,6 +4,9 @@ An internal, autonomous social-media content tool. AI drafts posts in your brand
 voice; **you review and approve them each morning**; approved posts are scheduled
 and published across LinkedIn, Facebook, X, and Instagram.
 
+> **▶ Want to run it on your machine? See [RUNNING_LOCALLY.md](./RUNNING_LOCALLY.md)** —
+> with Docker it's a single `docker compose up --build`.
+
 > Phase 0 scaffold. The full generate → review → schedule → publish loop is
 > implemented. Live publishing is gated on each platform's app approval (see
 > [Platform requirements](#platform-api-requirements)); until then you can fully

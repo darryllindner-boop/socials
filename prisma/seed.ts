@@ -3,11 +3,16 @@
  * has something to show on first run. Uses the deterministic mock provider so
  * it works without any LLM API key.
  *
+ * Idempotent: if the demo brand already has posts, it leaves them alone (safe to
+ * run on every container start / repeatedly).
+ *
  * Run with: npm run db:seed
  */
+import "dotenv/config";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { MockLLMProvider } from "../src/core/llm/mock";
 import { generateVariants } from "../src/core/content/generator";
+import { evaluateVariant } from "../src/core/eval/evaluator";
 import type { Brand as DomainBrand, BrandVoice } from "../src/core/types";
 
 const prisma = new PrismaClient();
@@ -54,6 +59,12 @@ async function main(): Promise<void> {
     include: { assets: true },
   });
 
+  const existingPosts = await prisma.post.count({ where: { brandId: brand.id } });
+  if (existingPosts > 0) {
+    console.log(`Demo brand already seeded (${existingPosts} post(s)); leaving data as-is.`);
+    return;
+  }
+
   const domainBrand: DomainBrand = {
     id: brand.id,
     name: brand.name,
@@ -82,14 +93,25 @@ async function main(): Promise<void> {
       llmProvider: provider.name,
       llmModel: provider.model,
       variants: {
-        create: variants.map((v) => ({
-          platform: v.platform,
-          status: v.status,
-          body: v.body,
-          hashtags: v.hashtags,
-          validationNote: v.error,
-          events: { create: { type: "generated", detail: { provider: provider.name } } },
-        })),
+        create: variants.map((v) => {
+          const result = evaluateVariant({
+            platform: v.platform,
+            body: v.body,
+            hashtags: v.hashtags,
+            voice,
+            priorTexts: [],
+          });
+          return {
+            platform: v.platform,
+            status: v.status,
+            body: v.body,
+            hashtags: v.hashtags,
+            validationNote: v.error,
+            evalScore: result.score,
+            evalIssues: result as unknown as Prisma.InputJsonValue,
+            events: { create: { type: "generated", detail: { provider: provider.name } } },
+          };
+        }),
       },
     },
     include: { variants: true },

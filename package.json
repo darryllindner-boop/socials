@@ -6,10 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "dev:all": "node scripts/dev-all.mjs",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "setup": "node scripts/setup-env.mjs && prisma generate",
+    "setup:db": "prisma db push && tsx prisma/seed.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -24,6 +27,7 @@
   "dependencies": {
     "@prisma/client": "^6.2.1",
     "bullmq": "^5.34.5",
+    "dotenv": "^16.4.7",
     "ioredis": "^5.4.2",
     "next": "^15.1.4",
     "react": "^19.0.0",

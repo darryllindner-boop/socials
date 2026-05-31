@@ -1,13 +1,19 @@
 # Single image used for BOTH the web app (`npm run start`) and the worker
 # (`npm run worker`). The worker runs TypeScript via tsx, so we keep the full
 # dependency set (no standalone trim) for a simple, reliable image.
-FROM node:22-alpine AS build
+#
+# Debian "slim" (not Alpine) is used because Prisma's query engine is far less
+# fussy about OpenSSL/glibc there — fewer "could not locate the query engine"
+# surprises on a developer's machine.
+FROM node:22-slim AS build
 WORKDIR /app
 
-# System deps Prisma needs on Alpine.
-RUN apk add --no-cache openssl
+# OpenSSL + CA certs are required by Prisma.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies (no lockfile in repo yet, so use install, not ci).
+# Install dependencies (no lockfile committed yet, so use install, not ci).
 COPY package.json ./
 RUN npm install
 

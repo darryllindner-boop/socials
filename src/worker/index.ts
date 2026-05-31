@@ -11,6 +11,7 @@
  * publishable state, refuses to publish without a connected account, and writes
  * an audit event for every outcome.
  */
+import "dotenv/config";
 import { Worker, type Job } from "bullmq";
 import { prisma } from "@/lib/db";
 import {
