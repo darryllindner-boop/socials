@@ -165,6 +165,11 @@ autonomy viable.
   pulls at +1h and +24h (likes/comments/shares/impressions/reach, normalised
   per platform). A "Refresh" button on each published card pulls on demand.
   History is kept in `VariantMetricSnapshot` for trends/evaluation.
+- **Analytics dashboard** (`/analytics`): aggregates published-post engagement
+  into headline totals, a per-platform table, a daily engagement trend, and a
+  ranked top-posts list. Aggregation lives in `src/core/analytics` (pure +
+  verified); the page just renders it. Weighted engagement = likes + 2·comments
+  + 3·shares.
 - **Multi-account / multi-Page:** connecting Meta stores every Page (and every
   IG-linked Page) you manage; pick the active one per platform on the
   Connections page. Scheduling links each variant to its platform's active

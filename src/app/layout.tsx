@@ -25,6 +25,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <Link href="/" className="hover:text-slate-900">
                   Review queue
                 </Link>
+                <Link href="/analytics" className="hover:text-slate-900">
+                  Analytics
+                </Link>
                 <Link href="/connections" className="hover:text-slate-900">
                   Connections
                 </Link>

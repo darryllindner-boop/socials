@@ -16,6 +16,8 @@ import { planSchedule, nextReviewWindow } from "../schedule/planner";
 import { validateForPlatform } from "../content/platform-rules";
 import { evaluateVariant } from "../eval/evaluator";
 import { textSimilarity } from "../eval/similarity";
+import { summarize, topPosts, dailyTrend, engagementScore } from "../analytics/aggregate";
+import type { AnalyticsRecord } from "../analytics/aggregate";
 import type { Brand, PostVariant } from "../types";
 
 let failures = 0;
@@ -226,6 +228,58 @@ async function main(): Promise<void> {
   check(
     "unrelated texts are dissimilar",
     textSimilarity(cleanText, "Quarterly tax filing tips for freelancers.") < 0.2,
+  );
+
+  console.log("\n6) Analytics aggregation:");
+  const analyticsRecords: AnalyticsRecord[] = [
+    {
+      id: "a1",
+      platform: "linkedin",
+      publishedAt: "2026-05-30T09:00:00.000Z",
+      bodyPreview: "post 1",
+      metrics: { likes: 10, comments: 2, shares: 1 },
+      evalScore: 0.9,
+    },
+    {
+      id: "a2",
+      platform: "linkedin",
+      publishedAt: "2026-05-31T09:00:00.000Z",
+      bodyPreview: "post 2",
+      metrics: { likes: 100, comments: 20, shares: 5 },
+      evalScore: 0.8,
+    },
+    {
+      id: "a3",
+      platform: "instagram",
+      publishedAt: "2026-05-31T13:00:00.000Z",
+      bodyPreview: "post 3",
+      metrics: { likes: 50, comments: 0, shares: 0 },
+      evalScore: 1.0,
+    },
+  ];
+
+  const summary = summarize(analyticsRecords);
+  check("summary counts all posts", summary.totalPosts === 3);
+  check("summary sums likes (160)", summary.totals.likes === 160);
+  check(
+    "engagement weighting (comments x2, shares x3)",
+    engagementScore({ likes: 10, comments: 2, shares: 1 }) === 10 + 4 + 3,
+  );
+  check("per-platform breakdown has 2 platforms", summary.byPlatform.length === 2);
+  check(
+    "avg eval score is averaged",
+    summary.avgEvalScore !== null && Math.abs(summary.avgEvalScore - 0.9) < 0.001,
+  );
+
+  const top = topPosts(analyticsRecords, 2);
+  check("top posts ranks highest engagement first", top[0]!.id === "a2");
+  check("top posts respects limit", top.length === 2);
+
+  const trend = dailyTrend(analyticsRecords, 3, 120, new Date("2026-05-31T20:00:00Z"));
+  check("trend covers the requested 3 days", trend.length === 3);
+  check(
+    "trend bucketed posts into the right local days",
+    trend[trend.length - 1]!.posts === 2 && trend[trend.length - 2]!.posts === 1,
   );
 
   console.log("");

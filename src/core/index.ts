@@ -49,3 +49,18 @@ export {
   tokenize,
 } from "./eval/similarity";
 export type { SimilarityMatch } from "./eval/similarity";
+export {
+  engagementScore,
+  summarize,
+  topPosts,
+  dailyTrend,
+  localDateKey,
+} from "./analytics/aggregate";
+export type {
+  EngagementMetrics,
+  AnalyticsRecord,
+  AnalyticsSummary,
+  PlatformSummary,
+  Totals,
+  TrendPoint,
+} from "./analytics/aggregate";
