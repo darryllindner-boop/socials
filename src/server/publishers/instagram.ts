@@ -2,9 +2,11 @@ import type { Platform } from "@/core/types";
 import {
   composeText,
   type AccountIdentity,
+  type MetricsInput,
   type OAuthExchangeInput,
   type OAuthStartInput,
   type OAuthTokens,
+  type PostMetrics,
   type Publisher,
   type PublishInput,
   type PublishResult,
@@ -70,6 +72,22 @@ export class InstagramPublisher implements Publisher {
     };
   }
 
+  /** Every IG-linked Page becomes a selectable account (multi-account support). */
+  async listAccounts(accessToken: string): Promise<AccountIdentity[]> {
+    const pages = await this.fb.listManagedPages(accessToken);
+    return pages
+      .filter((p) => p.instagram_business_account?.id)
+      .map((page) => {
+        const ig = page.instagram_business_account!;
+        return {
+          externalId: ig.id,
+          displayName: ig.username ? `@${ig.username}` : "Instagram account",
+          accessToken: page.access_token,
+          metadata: { pageId: page.id, igUserId: ig.id, username: ig.username },
+        };
+      });
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     if (!input.accessToken) {
       return { ok: false, notConfigured: true, error: "Instagram account not connected." };
@@ -113,5 +131,47 @@ export class InstagramPublisher implements Publisher {
       };
     }
     return { ok: true, externalId: pubData.id };
+  }
+
+  /** Engagement via IG media insights + like/comment counts. */
+  async fetchMetrics(input: MetricsInput): Promise<PostMetrics> {
+    const url = new URL(`${GRAPH}/${input.postExternalId}`);
+    url.searchParams.set("fields", "like_count,comments_count");
+    url.searchParams.set("access_token", input.accessToken);
+    const res = await fetch(url.toString());
+    const data = (await res.json()) as { like_count?: number; comments_count?: number };
+    if (!res.ok) {
+      throw new Error(`Instagram insights failed (${res.status}): ${JSON.stringify(data)}`);
+    }
+
+    // Reach/impressions live on a separate insights edge; best-effort.
+    let reach: number | undefined;
+    let impressions: number | undefined;
+    try {
+      const insUrl = new URL(`${GRAPH}/${input.postExternalId}/insights`);
+      insUrl.searchParams.set("metric", "reach,impressions");
+      insUrl.searchParams.set("access_token", input.accessToken);
+      const insRes = await fetch(insUrl.toString());
+      if (insRes.ok) {
+        const ins = (await insRes.json()) as {
+          data?: Array<{ name: string; values?: Array<{ value?: number }> }>;
+        };
+        for (const m of ins.data ?? []) {
+          if (m.name === "reach") reach = m.values?.[0]?.value;
+          if (m.name === "impressions") impressions = m.values?.[0]?.value;
+        }
+      }
+    } catch {
+      /* insights are optional */
+    }
+
+    return {
+      likes: data.like_count,
+      comments: data.comments_count,
+      reach,
+      impressions,
+      fetchedAt: new Date().toISOString(),
+      raw: data as Record<string, unknown>,
+    };
   }
 }

@@ -4,10 +4,12 @@ import {
   oauth2Exchange,
   oauth2Refresh,
   type AccountIdentity,
+  type MetricsInput,
   type OAuthExchangeInput,
   type OAuthRefreshInput,
   type OAuthStartInput,
   type OAuthTokens,
+  type PostMetrics,
   type Publisher,
   type PublishInput,
   type PublishResult,
@@ -108,5 +110,34 @@ export class LinkedInPublisher implements Publisher {
     }
     const id = res.headers.get("x-restli-id") ?? undefined;
     return { ok: true, externalId: id };
+  }
+
+  /**
+   * Engagement via the socialActions endpoint: likes + comments for the share.
+   * Reach/impressions are only available for organization posts, so they are
+   * omitted for member shares.
+   */
+  async fetchMetrics(input: MetricsInput): Promise<PostMetrics> {
+    const urn = encodeURIComponent(input.postExternalId);
+    const res = await fetch(`https://api.linkedin.com/v2/socialActions/${urn}`, {
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`LinkedIn socialActions failed (${res.status}): ${await res.text()}`);
+    }
+    const data = (await res.json()) as {
+      likesSummary?: { totalLikes?: number };
+      commentsSummary?: { aggregatedTotalComments?: number; count?: number };
+    };
+    return {
+      likes: data.likesSummary?.totalLikes,
+      comments:
+        data.commentsSummary?.aggregatedTotalComments ?? data.commentsSummary?.count,
+      fetchedAt: new Date().toISOString(),
+      raw: data as Record<string, unknown>,
+    };
   }
 }

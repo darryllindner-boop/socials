@@ -5,15 +5,28 @@
  * means the review/publish rules stay consistent everywhere.
  */
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import { getLLMProvider } from "@/lib/llm";
 import { enqueuePublish } from "@/lib/queue";
 import { generateVariants } from "@/core/content/generator";
 import { applyReviewAction, type ReviewAction } from "@/core/review/queue";
 import { planSchedule } from "@/core/schedule/planner";
 import type { Brand, BrandVoice, Platform, PostStatus, PostVariant } from "@/core/types";
+import { getPublisher } from "@/server/publishers";
+import type { PostMetrics } from "@/server/publishers/publisher";
+import { getValidAccessToken } from "@/server/tokens";
 import { parseSlotHours, tzOffsetMinutes } from "@/server/time";
 
 const DEMO_BRAND_ID = "brand_demo";
+
+/** The single active, connected account for a (brand, platform), or null. */
+async function getActiveAccountId(brandId: string, platform: Platform): Promise<string | null> {
+  const account = await prisma.socialAccount.findFirst({
+    where: { brandId, platform, isActive: true, accessToken: { not: null } },
+    select: { id: true },
+  });
+  return account?.id ?? null;
+}
 
 /** Load a brand into the core's domain shape (voice JSON -> typed BrandVoice). */
 async function loadDomainBrand(brandId: string): Promise<Brand> {
@@ -73,7 +86,76 @@ export async function generateBatch(input: {
     include: { variants: true },
   });
 
+  // Auto channels (account autonomy = "auto") skip the morning review: their
+  // variants are approved and scheduled immediately. Channels without a
+  // connected account, or set to manual/review_required, stay in pending_review.
+  const autoPlatforms = await getAutoPlatforms(brandId);
+  const autoRows = post.variants.filter((v) => autoPlatforms.has(v.platform));
+  if (autoRows.length > 0) {
+    const approvedCore: PostVariant[] = [];
+    for (const v of autoRows) {
+      await prisma.variant.update({ where: { id: v.id }, data: { status: "approved" } });
+      await prisma.variantEvent.create({
+        data: { variantId: v.id, type: "approved", actor: "autopilot" },
+      });
+      approvedCore.push({ ...toCoreVariant(v), status: "approved" });
+    }
+    await scheduleCoreVariants(approvedCore, brandId, "autopilot");
+  }
+
   return { postId: post.id, count: post.variants.length };
+}
+
+/** Platforms whose active account is set to fully-autonomous posting. */
+async function getAutoPlatforms(brandId: string): Promise<Set<Platform>> {
+  const accounts = await prisma.socialAccount.findMany({
+    where: { brandId, isActive: true, autonomy: "auto" },
+    select: { platform: true },
+  });
+  return new Set(accounts.map((a) => a.platform));
+}
+
+/**
+ * Schedule a set of already-approved variants across the configured daily slots,
+ * linking each to its platform's active account and enqueuing the publish job.
+ * Shared by the manual "schedule all approved" action and the autonomy path.
+ */
+async function scheduleCoreVariants(
+  approved: PostVariant[],
+  brandId: string,
+  actor: string,
+): Promise<{ scheduled: number; unscheduled: number }> {
+  const now = new Date();
+  const tz = process.env.REVIEW_TIMEZONE ?? "Europe/Oslo";
+  const plan = planSchedule(approved, {
+    slotHours: parseSlotHours(process.env.POSTING_SLOT_HOURS, [9, 13, 17]),
+    tzOffsetMinutes: tzOffsetMinutes(tz, now),
+    now,
+    horizonDays: 7,
+  });
+
+  const accountCache = new Map<Platform, string | null>();
+  let scheduled = 0;
+  for (const v of plan.scheduled) {
+    if (v.status !== "scheduled" || !v.scheduledFor) continue;
+    if (!accountCache.has(v.platform)) {
+      accountCache.set(v.platform, await getActiveAccountId(brandId, v.platform));
+    }
+    await prisma.variant.update({
+      where: { id: v.id },
+      data: {
+        status: "scheduled",
+        scheduledFor: new Date(v.scheduledFor),
+        socialAccountId: accountCache.get(v.platform) ?? null,
+      },
+    });
+    await prisma.variantEvent.create({
+      data: { variantId: v.id, type: "scheduled", actor, detail: { scheduledFor: v.scheduledFor } },
+    });
+    await enqueuePublish(v.id, new Date(v.scheduledFor));
+    scheduled += 1;
+  }
+  return { scheduled, unscheduled: plan.unscheduled.length };
 }
 
 export interface ReviewQueueItem {
@@ -88,6 +170,7 @@ export interface ReviewQueueItem {
   topic: string;
   createdAt: string;
   accountConnected: boolean;
+  metrics: PostMetrics | null;
 }
 
 /** Load everything the morning review dashboard needs, grouped by status. */
@@ -116,6 +199,7 @@ export async function getReviewQueue(brandId: string = DEMO_BRAND_ID): Promise<{
     topic: v.post.topic,
     createdAt: v.createdAt.toISOString(),
     accountConnected: Boolean(v.socialAccount?.accessToken),
+    metrics: (v.metrics as unknown as PostMetrics | null) ?? null,
   });
 
   const pending: ReviewQueueItem[] = [];
@@ -231,7 +315,11 @@ export async function scheduleVariant(variantId: string, when: Date): Promise<vo
 
   await prisma.variant.update({
     where: { id: variantId },
-    data: { status: scheduled.status, scheduledFor: when },
+    data: {
+      status: scheduled.status,
+      scheduledFor: when,
+      socialAccountId: await getActiveAccountId(DEMO_BRAND_ID, row.platform),
+    },
   });
   await prisma.variantEvent.create({
     data: {
@@ -257,30 +345,44 @@ export async function scheduleApproved(brandId: string = DEMO_BRAND_ID): Promise
     where: { post: { brandId }, status: "approved" },
     orderBy: { createdAt: "asc" },
   });
+  return scheduleCoreVariants(rows.map(toCoreVariant), brandId, "reviewer");
+}
 
-  const now = new Date();
-  const tz = process.env.REVIEW_TIMEZONE ?? "Europe/Oslo";
-  const plan = planSchedule(rows.map(toCoreVariant), {
-    slotHours: parseSlotHours(process.env.POSTING_SLOT_HOURS, [9, 13, 17]),
-    tzOffsetMinutes: tzOffsetMinutes(tz, now),
-    now,
-    horizonDays: 7,
+/**
+ * Fetch and persist engagement metrics for a published variant. Stores the
+ * latest snapshot on the variant and appends to its metric history. No-ops
+ * gracefully when the variant isn't published, has no account, or the platform
+ * doesn't support metrics.
+ */
+export async function collectMetrics(variantId: string): Promise<PostMetrics | null> {
+  const variant = await prisma.variant.findUnique({
+    where: { id: variantId },
+    include: { socialAccount: true },
+  });
+  if (!variant || variant.status !== "published" || !variant.externalId) return null;
+  if (!variant.socialAccount?.accessToken) return null;
+
+  const publisher = getPublisher(variant.platform);
+  if (!publisher.fetchMetrics) return null;
+
+  const accessToken = await getValidAccessToken(variant.socialAccount);
+  const metrics = await publisher.fetchMetrics({
+    accessToken,
+    accountExternalId: variant.socialAccount.externalId,
+    postExternalId: variant.externalId,
+    metadata: (variant.socialAccount.metadata as Record<string, unknown>) ?? undefined,
   });
 
-  let scheduled = 0;
-  for (const v of plan.scheduled) {
-    if (v.status === "scheduled" && v.scheduledFor) {
-      await prisma.variant.update({
-        where: { id: v.id },
-        data: { status: "scheduled", scheduledFor: new Date(v.scheduledFor) },
-      });
-      await prisma.variantEvent.create({
-        data: { variantId: v.id, type: "scheduled", actor: "reviewer", detail: { scheduledFor: v.scheduledFor } },
-      });
-      await enqueuePublish(v.id, new Date(v.scheduledFor));
-      scheduled += 1;
-    }
-  }
+  await prisma.variant.update({
+    where: { id: variantId },
+    data: {
+      metrics: metrics as unknown as Prisma.InputJsonValue,
+      metricsUpdatedAt: new Date(metrics.fetchedAt),
+    },
+  });
+  await prisma.variantMetricSnapshot.create({
+    data: { variantId, data: metrics as unknown as Prisma.InputJsonValue },
+  });
 
-  return { scheduled, unscheduled: plan.unscheduled.length };
+  return metrics;
 }

@@ -2,9 +2,11 @@ import type { Platform } from "@/core/types";
 import {
   composeText,
   type AccountIdentity,
+  type MetricsInput,
   type OAuthExchangeInput,
   type OAuthStartInput,
   type OAuthTokens,
+  type PostMetrics,
   type Publisher,
   type PublishInput,
   type PublishResult,
@@ -133,6 +135,17 @@ export class FacebookPublisher implements Publisher {
     };
   }
 
+  /** Every Page the user manages becomes a selectable account (multi-Page support). */
+  async listAccounts(accessToken: string): Promise<AccountIdentity[]> {
+    const pages = await this.listManagedPages(accessToken);
+    return pages.map((page) => ({
+      externalId: page.id,
+      displayName: page.name,
+      accessToken: page.access_token,
+      metadata: { pageId: page.id },
+    }));
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     if (!input.accessToken) {
       return { ok: false, notConfigured: true, error: "Facebook Page not connected." };
@@ -148,6 +161,33 @@ export class FacebookPublisher implements Publisher {
       return { ok: false, error: `Facebook publish failed (${res.status}): ${JSON.stringify(data)}` };
     }
     return { ok: true, externalId: data.id };
+  }
+
+  /** Engagement for a Page post: reactions, comments, shares (Graph summaries). */
+  async fetchMetrics(input: MetricsInput): Promise<PostMetrics> {
+    const url = new URL(`${GRAPH}/${input.postExternalId}`);
+    url.searchParams.set(
+      "fields",
+      "reactions.summary(total_count),comments.summary(total_count),shares",
+    );
+    url.searchParams.set("access_token", input.accessToken);
+
+    const res = await fetch(url.toString());
+    const data = (await res.json()) as {
+      reactions?: { summary?: { total_count?: number } };
+      comments?: { summary?: { total_count?: number } };
+      shares?: { count?: number };
+    };
+    if (!res.ok) {
+      throw new Error(`Facebook insights failed (${res.status}): ${JSON.stringify(data)}`);
+    }
+    return {
+      likes: data.reactions?.summary?.total_count,
+      comments: data.comments?.summary?.total_count,
+      shares: data.shares?.count,
+      fetchedAt: new Date().toISOString(),
+      raw: data as Record<string, unknown>,
+    };
   }
 }
 

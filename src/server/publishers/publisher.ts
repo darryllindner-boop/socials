@@ -82,6 +82,30 @@ export interface PublishResult {
   notConfigured?: boolean;
 }
 
+/** Normalised engagement metrics across platforms (not all fields apply everywhere). */
+export interface PostMetrics {
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  impressions?: number;
+  reach?: number;
+  clicks?: number;
+  /** ISO timestamp of when these were fetched. */
+  fetchedAt: string;
+  /** Provider raw payload, for debugging/auditing. */
+  raw?: Record<string, unknown>;
+}
+
+export interface MetricsInput {
+  /** Decrypted access token for the connected account. */
+  accessToken: string;
+  /** The account/page id. */
+  accountExternalId: string;
+  /** The platform's id for the published post (Variant.externalId). */
+  postExternalId: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface Publisher {
   readonly platform: Platform;
   /** OAuth scopes this integration needs. */
@@ -97,8 +121,16 @@ export interface Publisher {
    * placeholder until wired (publishing is still guarded by a real token).
    */
   fetchIdentity?(accessToken: string, raw: Record<string, unknown>): Promise<AccountIdentity>;
+  /**
+   * List ALL accounts the user can publish as (e.g. every Meta Page / IG
+   * account). Enables multi-account selection in the UI. Optional: platforms
+   * with a single identity rely on fetchIdentity instead.
+   */
+  listAccounts?(accessToken: string, raw: Record<string, unknown>): Promise<AccountIdentity[]>;
   /** Refresh an access token using a refresh token (platforms that support it). */
   refreshAccessToken?(input: OAuthRefreshInput): Promise<OAuthTokens>;
+  /** Fetch engagement metrics for a published post (analytics pull-back). Optional. */
+  fetchMetrics?(input: MetricsInput): Promise<PostMetrics>;
 }
 
 /** Compose body + hashtags into a single string for platforms that inline tags. */

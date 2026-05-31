@@ -3,7 +3,8 @@
  *
  * Responsibilities:
  *   1. publish queue  -> publish an approved+scheduled variant at its time.
- *   2. review queue   -> assemble the daily "morning review" digest (logs the
+ *   2. metrics queue  -> pull engagement metrics for a published variant.
+ *   3. review queue   -> assemble the daily "morning review" digest (logs the
  *      count of pending variants; hook email/Slack here later).
  *
  * Publishing is intentionally defensive: it re-checks the variant is still in a
@@ -12,11 +13,23 @@
  */
 import { Worker, type Job } from "bullmq";
 import { prisma } from "@/lib/db";
-import { getRedis, PUBLISH_QUEUE, REVIEW_QUEUE, type PublishJobData } from "@/lib/queue";
+import {
+  enqueueMetrics,
+  getRedis,
+  METRICS_QUEUE,
+  PUBLISH_QUEUE,
+  REVIEW_QUEUE,
+  type MetricsJobData,
+  type PublishJobData,
+} from "@/lib/queue";
 import { getPublisher } from "@/server/publishers";
 import { getValidAccessToken } from "@/server/tokens";
+import { collectMetrics } from "@/server/service";
 
 const connection = getRedis();
+
+// Pull metrics at these offsets after publishing (early signal + settled view).
+const METRIC_PULL_OFFSETS_MS = [60 * 60_000, 24 * 60 * 60_000];
 
 const publishWorker = new Worker<PublishJobData>(
   PUBLISH_QUEUE,
@@ -68,6 +81,10 @@ const publishWorker = new Worker<PublishJobData>(
         });
         await event(variantId, "published", { externalId: result.externalId });
         console.log(`[publish] ${variant.platform} variant ${variantId} published (${result.externalId ?? "n/a"}).`);
+        // Schedule analytics pull-back at a few offsets to close the loop.
+        for (const offset of METRIC_PULL_OFFSETS_MS) {
+          await enqueueMetrics(variantId, offset);
+        }
       } else {
         // notConfigured failures are terminal (don't retry); transient ones throw to retry.
         if (result.notConfigured) {
@@ -98,6 +115,20 @@ const reviewWorker = new Worker(
   { connection },
 );
 
+const metricsWorker = new Worker<MetricsJobData>(
+  METRICS_QUEUE,
+  async (job: Job<MetricsJobData>) => {
+    const metrics = await collectMetrics(job.data.variantId);
+    if (metrics) {
+      console.log(
+        `[metrics] ${job.data.variantId}: ` +
+          `${metrics.likes ?? 0} likes, ${metrics.comments ?? 0} comments`,
+      );
+    }
+  },
+  { connection, concurrency: 4 },
+);
+
 async function fail(variantId: string, message: string): Promise<void> {
   await prisma.variant.update({
     where: { id: variantId },
@@ -111,11 +142,11 @@ async function event(variantId: string, type: string, detail?: Record<string, un
   await prisma.variantEvent.create({ data: { variantId, type, detail: detail ?? undefined } });
 }
 
-console.log("Worker started. Listening on queues:", PUBLISH_QUEUE, REVIEW_QUEUE);
+console.log("Worker started. Listening on queues:", PUBLISH_QUEUE, METRICS_QUEUE, REVIEW_QUEUE);
 
 async function shutdown(): Promise<void> {
   console.log("Shutting down worker…");
-  await Promise.allSettled([publishWorker.close(), reviewWorker.close()]);
+  await Promise.allSettled([publishWorker.close(), reviewWorker.close(), metricsWorker.close()]);
   await prisma.$disconnect();
   process.exit(0);
 }

@@ -10,14 +10,20 @@ import IORedis from "ioredis";
  */
 export const PUBLISH_QUEUE = "publish";
 export const REVIEW_QUEUE = "morning-review";
+export const METRICS_QUEUE = "metrics";
 
 export interface PublishJobData {
+  variantId: string;
+}
+
+export interface MetricsJobData {
   variantId: string;
 }
 
 const globalForQueue = globalThis as unknown as {
   redis?: IORedis;
   publishQueue?: Queue<PublishJobData>;
+  metricsQueue?: Queue<MetricsJobData>;
 };
 
 export function getRedis(): IORedis {
@@ -45,6 +51,21 @@ export function getPublishQueue(): Queue<PublishJobData> {
   return globalForQueue.publishQueue;
 }
 
+export function getMetricsQueue(): Queue<MetricsJobData> {
+  if (!globalForQueue.metricsQueue) {
+    globalForQueue.metricsQueue = new Queue<MetricsJobData>(METRICS_QUEUE, {
+      connection: getRedis(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5 * 60_000 },
+        removeOnComplete: 2000,
+        removeOnFail: 1000,
+      },
+    });
+  }
+  return globalForQueue.metricsQueue;
+}
+
 /**
  * Enqueue a publish job at the variant's scheduled time. BullMQ's `delay` is
  * relative, so we compute the delay from now; past times publish immediately.
@@ -55,5 +76,17 @@ export async function enqueuePublish(variantId: string, scheduledFor: Date): Pro
     "publish-variant",
     { variantId },
     { delay, jobId: `publish:${variantId}` },
+  );
+}
+
+/**
+ * Enqueue a metrics-collection job after `delayMs`. A distinct jobId per delay
+ * bucket lets us schedule several pulls (e.g. +1h, +24h) without collisions.
+ */
+export async function enqueueMetrics(variantId: string, delayMs: number): Promise<void> {
+  await getMetricsQueue().add(
+    "collect-metrics",
+    { variantId },
+    { delay: Math.max(0, delayMs), jobId: `metrics:${variantId}:${Math.round(delayMs)}` },
   );
 }

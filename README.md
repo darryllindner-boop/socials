@@ -125,21 +125,34 @@ the app is designed to be useful before they land.
   + OAuth scaffolding; offline-verifiable core.
 - **Phase 1 (done):** LinkedIn OAuth identity resolution (person URN via OpenID
   userinfo) + token refresh + member-share publishing.
-- **Phase 2 (in progress):** Meta (Facebook + Instagram) — long-lived user
-  tokens, Page-token identity resolution via `/me/accounts`, IG business-account
+- **Phase 2 (done):** Meta (Facebook + Instagram) — long-lived user tokens,
+  Page-token identity resolution via `/me/accounts`, IG business-account
   discovery, and the Instagram media pipeline (attach image URLs in the queue).
-  Analytics pull-back still to come.
-- **Phase 3:** autonomy dial per channel, eval tooling (repetition/off-brand
-  detection), team/agency permissions.
-- **Phase 4:** X publishing once a paid tier is available; pgvector-backed
+- **Phase 3 (done):** analytics pull-back (engagement metrics per platform),
+  per-channel autonomy dial (manual / review-required / auto), and multi-account
+  (multi-Page) selection for Meta.
+- **Phase 4:** X publishing once a paid tier is available; eval tooling
+  (repetition/off-brand detection); team/agency permissions; pgvector-backed
   semantic RAG over brand assets.
 
 ## Notes
 
+- **Autonomy dial:** each connected account has an autonomy level (set on the
+  Connections page). `review_required` (default) routes drafts to the morning
+  queue; `auto` approves + schedules them immediately without review; `manual`
+  keeps them in the queue for you to handle. Autonomy is per active account.
+- **Analytics pull-back:** after a post publishes, the worker schedules metric
+  pulls at +1h and +24h (likes/comments/shares/impressions/reach, normalised
+  per platform). A "Refresh" button on each published card pulls on demand.
+  History is kept in `VariantMetricSnapshot` for trends/evaluation.
+- **Multi-account / multi-Page:** connecting Meta stores every Page (and every
+  IG-linked Page) you manage; pick the active one per platform on the
+  Connections page. Scheduling links each variant to its platform's active
+  account, and that's what the worker publishes through.
 - **Meta token model:** the OAuth code exchange yields a short-lived user token,
   which is upgraded to a long-lived one; publishing then uses the **Page access
   token** discovered during identity resolution (Page tokens from long-lived
-  user tokens don't expire). Set `META_PAGE_ID` to target a specific Page.
+  user tokens don't expire). Set `META_PAGE_ID` to pre-select a Page.
 - **Instagram** has no text-only posts — attach a public image URL to a variant
   in the review queue before approving (the card shows an "Image…" control and
   flags IG variants that still need media).

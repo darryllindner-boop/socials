@@ -3,10 +3,12 @@ import {
   composeText,
   oauth2Exchange,
   type AccountIdentity,
+  type MetricsInput,
   type OAuthExchangeInput,
   type OAuthRefreshInput,
   type OAuthStartInput,
   type OAuthTokens,
+  type PostMetrics,
   type Publisher,
   type PublishInput,
   type PublishResult,
@@ -113,5 +115,37 @@ export class XPublisher implements Publisher {
       return { ok: false, error: `X publish failed (${res.status}): ${JSON.stringify(data)}` };
     }
     return { ok: true, externalId: data.data?.id };
+  }
+
+  /** Engagement via the tweet's public_metrics (likes, retweets, replies, impressions). */
+  async fetchMetrics(input: MetricsInput): Promise<PostMetrics> {
+    const url = new URL(`https://api.twitter.com/2/tweets/${input.postExternalId}`);
+    url.searchParams.set("tweet.fields", "public_metrics");
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${input.accessToken}` },
+    });
+    const data = (await res.json()) as {
+      data?: {
+        public_metrics?: {
+          like_count?: number;
+          reply_count?: number;
+          retweet_count?: number;
+          quote_count?: number;
+          impression_count?: number;
+        };
+      };
+    };
+    if (!res.ok) {
+      throw new Error(`X tweet lookup failed (${res.status}): ${JSON.stringify(data)}`);
+    }
+    const m = data.data?.public_metrics ?? {};
+    return {
+      likes: m.like_count,
+      comments: m.reply_count,
+      shares: (m.retweet_count ?? 0) + (m.quote_count ?? 0),
+      impressions: m.impression_count,
+      fetchedAt: new Date().toISOString(),
+      raw: data as Record<string, unknown>,
+    };
   }
 }

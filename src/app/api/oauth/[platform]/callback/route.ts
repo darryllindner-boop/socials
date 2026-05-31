@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PLATFORMS, type Platform } from "@/core/types";
 import { prisma } from "@/lib/db";
 import { getPublisher } from "@/server/publishers";
+import type { AccountIdentity } from "@/server/publishers/publisher";
 import { getOAuthAppConfig, redirectUriFor } from "@/server/oauth-config";
 import { encryptToken } from "@/server/crypto";
 
@@ -10,12 +11,13 @@ const DEMO_BRAND_ID = "brand_demo";
 
 /**
  * OAuth callback: verify state (CSRF), exchange the code for tokens, resolve the
- * real account identity, encrypt tokens, and upsert the SocialAccount.
+ * connected account(s), encrypt tokens, and upsert them.
  *
- * Identity resolution is best-effort per platform (`publisher.fetchIdentity`):
- * if a platform hasn't wired it yet, or the call fails, we store a placeholder
- * externalId. The worker refuses to publish without a usable token, so nothing
- * is posted to the wrong place in the meantime.
+ * Platforms that expose multiple publishable targets (e.g. Meta Pages / IG
+ * accounts) return several candidates via `listAccounts`; we store each and
+ * activate one (META_PAGE_ID match, else the first). The user can switch the
+ * active account from the Connections page. The worker refuses to publish
+ * without a usable token, so a placeholder never posts anywhere.
  */
 export async function GET(
   req: NextRequest,
@@ -56,58 +58,79 @@ export async function GET(
       redirectUri: redirectUriFor(p),
     });
 
-    // Resolve the real account id + display name. If the platform hasn't wired
-    // identity resolution yet (or it fails), fall back to a placeholder — the
-    // worker still refuses to publish without a usable token/identity.
-    let externalId = `pending_${p}`;
-    let displayName = `${p} account`;
-    let metadata: Record<string, unknown> | undefined;
-    // Default to the OAuth-exchange token; identity resolution may override it
-    // (e.g. Meta returns a Page access token to publish with).
-    let publishToken = tokens.accessToken;
-    let tokenExpiresAt = tokens.expiresAt;
-    if (publisher.fetchIdentity) {
-      try {
-        const identity = await publisher.fetchIdentity(tokens.accessToken, tokens.raw);
-        externalId = identity.externalId;
-        displayName = identity.displayName;
-        metadata = identity.metadata;
-        if (identity.accessToken) {
-          publishToken = identity.accessToken;
-          tokenExpiresAt = identity.tokenExpiresAt;
-        }
-      } catch (idErr) {
-        console.warn(
-          `[oauth/${p}] identity resolution failed; storing placeholder:`,
-          idErr instanceof Error ? idErr.message : idErr,
-        );
+    // Gather candidate accounts: prefer listAccounts (multi-account platforms
+    // like Meta), else a single fetchIdentity, else a safe placeholder.
+    let identities: AccountIdentity[] = [];
+    try {
+      if (publisher.listAccounts) {
+        identities = await publisher.listAccounts(tokens.accessToken, tokens.raw);
+      } else if (publisher.fetchIdentity) {
+        identities = [await publisher.fetchIdentity(tokens.accessToken, tokens.raw)];
       }
+    } catch (idErr) {
+      console.warn(
+        `[oauth/${p}] identity resolution failed; storing placeholder:`,
+        idErr instanceof Error ? idErr.message : idErr,
+      );
+    }
+    if (identities.length === 0) {
+      identities = [{ externalId: `pending_${p}`, displayName: `${p} account` }];
     }
 
-    const metaInput = (metadata ?? undefined) as unknown as Prisma.InputJsonValue | undefined;
+    // Upsert each candidate account. For Meta the identity carries a Page token
+    // override; otherwise we store the OAuth-exchange token.
+    const upserted: { id: string; externalId: string; pageId?: string }[] = [];
+    for (const identity of identities) {
+      const storeToken = identity.accessToken ?? tokens.accessToken;
+      const storeExpiry = identity.accessToken ? identity.tokenExpiresAt : tokens.expiresAt;
+      const metaInput = (identity.metadata ?? undefined) as unknown as
+        | Prisma.InputJsonValue
+        | undefined;
 
-    await prisma.socialAccount.upsert({
-      where: { brandId_platform_externalId: { brandId: DEMO_BRAND_ID, platform: p, externalId } },
-      update: {
-        displayName,
-        metadata: metaInput,
-        accessToken: encryptToken(publishToken),
-        refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
-        tokenExpiresAt,
-        connectedAt: new Date(),
-      },
-      create: {
-        brandId: DEMO_BRAND_ID,
-        platform: p,
-        externalId,
-        displayName,
-        metadata: metaInput,
-        accessToken: encryptToken(publishToken),
-        refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
-        tokenExpiresAt,
-        connectedAt: new Date(),
-      },
+      const acc = await prisma.socialAccount.upsert({
+        where: {
+          brandId_platform_externalId: {
+            brandId: DEMO_BRAND_ID,
+            platform: p,
+            externalId: identity.externalId,
+          },
+        },
+        update: {
+          displayName: identity.displayName,
+          metadata: metaInput,
+          accessToken: encryptToken(storeToken),
+          refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
+          tokenExpiresAt: storeExpiry ?? null,
+          connectedAt: new Date(),
+        },
+        create: {
+          brandId: DEMO_BRAND_ID,
+          platform: p,
+          externalId: identity.externalId,
+          displayName: identity.displayName,
+          metadata: metaInput,
+          accessToken: encryptToken(storeToken),
+          refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
+          tokenExpiresAt: storeExpiry ?? null,
+          connectedAt: new Date(),
+        },
+      });
+      const pageId =
+        typeof identity.metadata?.pageId === "string" ? identity.metadata.pageId : undefined;
+      upserted.push({ id: acc.id, externalId: identity.externalId, pageId });
+    }
+
+    // Activate exactly one account for this (brand, platform).
+    const preferred = process.env.META_PAGE_ID;
+    const chosen =
+      (preferred &&
+        upserted.find((a) => a.pageId === preferred || a.externalId === preferred)) ||
+      upserted[0]!;
+    await prisma.socialAccount.updateMany({
+      where: { brandId: DEMO_BRAND_ID, platform: p },
+      data: { isActive: false },
     });
+    await prisma.socialAccount.update({ where: { id: chosen.id }, data: { isActive: true } });
 
     const res = redirectToConnections(req, p, "connected");
     res.cookies.delete(`oauth_state_${p}`);

@@ -4,11 +4,13 @@ import { useState, useTransition } from "react";
 import {
   approveAction,
   editAction,
+  refreshMetricsAction,
   rejectAction,
   scheduleVariantAction,
   setMediaAction,
 } from "@/app/actions";
 import { PLATFORM_RULES, type Platform, type PostStatus } from "@/core/types";
+import type { PostMetrics } from "@/server/publishers/publisher";
 import { PlatformBadge } from "./PlatformBadge";
 
 export interface VariantCardProps {
@@ -22,6 +24,7 @@ export interface VariantCardProps {
   scheduledFor: string | null;
   topic: string;
   accountConnected: boolean;
+  metrics: PostMetrics | null;
 }
 
 function defaultScheduleValue(): string {
@@ -155,6 +158,29 @@ export function VariantCard(props: VariantCardProps) {
         </p>
       )}
 
+      {props.status === "published" && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 text-xs text-slate-600">
+          {props.metrics ? (
+            <>
+              <Metric label="Likes" value={props.metrics.likes} />
+              <Metric label="Comments" value={props.metrics.comments} />
+              <Metric label="Shares" value={props.metrics.shares} />
+              <Metric label="Impressions" value={props.metrics.impressions} />
+              <Metric label="Reach" value={props.metrics.reach} />
+            </>
+          ) : (
+            <span className="text-slate-400">No metrics yet.</span>
+          )}
+          <button
+            className="ml-auto rounded-lg border border-slate-300 px-2.5 py-1 text-xs disabled:opacity-50"
+            disabled={pending}
+            onClick={() => run(() => refreshMetricsAction(props.id))}
+          >
+            {pending ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+      )}
+
       {isReviewable && !editing && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
@@ -279,5 +305,15 @@ export function VariantCard(props: VariantCardProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value?: number }) {
+  if (value === undefined || value === null) return null;
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="font-semibold text-slate-800">{value.toLocaleString()}</span>
+      <span className="text-slate-400">{label}</span>
+    </span>
   );
 }

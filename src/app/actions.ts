@@ -2,8 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { PLATFORMS } from "@/core/types";
-import { applyAction, generateBatch, scheduleApproved, scheduleVariant, setMedia } from "@/server/service";
+import { AUTONOMY_LEVELS, PLATFORMS } from "@/core/types";
+import {
+  applyAction,
+  collectMetrics,
+  generateBatch,
+  scheduleApproved,
+  scheduleVariant,
+  setMedia,
+} from "@/server/service";
+import { setActiveAccount, setAutonomy } from "@/server/connections";
 
 const platformSchema = z.enum(PLATFORMS);
 
@@ -83,4 +91,34 @@ export async function scheduleAllApprovedAction(): Promise<ActionResult> {
   const note =
     unscheduled > 0 ? ` (${unscheduled} left for tomorrow — not enough slots)` : "";
   return { ok: true, message: `Scheduled ${scheduled} post(s)${note}.` };
+}
+
+const autonomySchema = z.enum(AUTONOMY_LEVELS);
+
+export async function setAutonomyAction(
+  accountId: string,
+  autonomy: string,
+): Promise<ActionResult> {
+  const parsed = autonomySchema.safeParse(autonomy);
+  if (!parsed.success) {
+    return { ok: false, message: "Invalid autonomy level." };
+  }
+  await setAutonomy(accountId, parsed.data);
+  revalidatePath("/connections");
+  return { ok: true, message: "Autonomy updated." };
+}
+
+export async function setActiveAccountAction(accountId: string): Promise<ActionResult> {
+  await setActiveAccount(accountId);
+  revalidatePath("/connections");
+  return { ok: true, message: "Active account updated." };
+}
+
+export async function refreshMetricsAction(variantId: string): Promise<ActionResult> {
+  const metrics = await collectMetrics(variantId);
+  revalidatePath("/");
+  if (!metrics) {
+    return { ok: false, message: "No metrics yet (post may not be published or connected)." };
+  }
+  return { ok: true, message: "Metrics refreshed." };
 }
