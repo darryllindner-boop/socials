@@ -2,7 +2,9 @@ import type { Platform } from "@/core/types";
 import {
   composeText,
   oauth2Exchange,
+  type AccountIdentity,
   type OAuthExchangeInput,
+  type OAuthRefreshInput,
   type OAuthStartInput,
   type OAuthTokens,
   type Publisher,
@@ -39,6 +41,58 @@ export class XPublisher implements Publisher {
 
   exchangeCode(input: OAuthExchangeInput): Promise<OAuthTokens> {
     return oauth2Exchange("https://api.twitter.com/2/oauth2/token", input);
+  }
+
+  /**
+   * X confidential clients must authenticate the token endpoint with HTTP Basic
+   * auth, so the refresh is done explicitly rather than via the shared helper.
+   */
+  async refreshAccessToken(input: OAuthRefreshInput): Promise<OAuthTokens> {
+    const basic = Buffer.from(`${input.clientId}:${input.clientSecret}`).toString("base64");
+    const res = await fetch("https://api.twitter.com/2/oauth2/token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: input.refreshToken,
+        client_id: input.clientId,
+      }).toString(),
+    });
+    const raw = (await res.json()) as Record<string, unknown>;
+    if (!res.ok) {
+      throw new Error(`X token refresh failed (${res.status}): ${JSON.stringify(raw)}`);
+    }
+    const expiresIn = typeof raw.expires_in === "number" ? raw.expires_in : undefined;
+    return {
+      accessToken: String(raw.access_token ?? ""),
+      refreshToken:
+        typeof raw.refresh_token === "string" ? raw.refresh_token : input.refreshToken,
+      expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined,
+      raw,
+    };
+  }
+
+  /** Resolve the authenticated user's id + handle via /2/users/me. */
+  async fetchIdentity(accessToken: string): Promise<AccountIdentity> {
+    const res = await fetch("https://api.twitter.com/2/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      throw new Error(`X /users/me failed (${res.status}): ${await res.text()}`);
+    }
+    const data = (await res.json()) as { data?: { id?: string; username?: string; name?: string } };
+    const id = data.data?.id;
+    if (!id) {
+      throw new Error("X /users/me returned no id.");
+    }
+    return {
+      externalId: id,
+      displayName: data.data?.username ? `@${data.data.username}` : (data.data?.name ?? "X account"),
+      metadata: { username: data.data?.username },
+    };
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {

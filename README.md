@@ -123,7 +123,9 @@ the app is designed to be useful before they land.
 
 - **Phase 0 (this scaffold):** generation → review queue → scheduling; publisher
   + OAuth scaffolding; offline-verifiable core.
-- **Phase 1:** complete LinkedIn OAuth + publish end-to-end; analytics pull-back.
+- **Phase 1 (in progress):** LinkedIn OAuth identity resolution (person URN via
+  OpenID userinfo) + token refresh + member-share publishing. Analytics
+  pull-back still to come.
 - **Phase 2:** Meta (FB/IG) publish incl. media pipeline & templates.
 - **Phase 3:** autonomy dial per channel, eval tooling (repetition/off-brand
   detection), team/agency permissions.
@@ -132,6 +134,8 @@ the app is designed to be useful before they land.
 
 ## Notes
 
+- OAuth tokens are encrypted at rest (AES-256-GCM) and auto-refreshed before
+  publishing via `src/server/tokens.ts` when the platform supports it.
 - `src/core/brand/voice.ts` uses lexical keyword matching as a stand-in for the
   pgvector semantic retrieval planned in Phase 4.
 - The `mock` provider is deterministic (seeded), so generated content is

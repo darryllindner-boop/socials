@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { PLATFORMS, type Platform } from "@/core/types";
 import { prisma } from "@/lib/db";
 import { getPublisher } from "@/server/publishers";
@@ -8,13 +9,13 @@ import { encryptToken } from "@/server/crypto";
 const DEMO_BRAND_ID = "brand_demo";
 
 /**
- * OAuth callback: verify state (CSRF), exchange the code for tokens, encrypt
- * them, and upsert the SocialAccount.
+ * OAuth callback: verify state (CSRF), exchange the code for tokens, resolve the
+ * real account identity, encrypt tokens, and upsert the SocialAccount.
  *
- * NOTE (Phase 1 TODO): deriving the real account/page id + display name needs a
- * follow-up call to each platform's "me"/pages endpoint. Until that's wired we
- * store a placeholder externalId; publishing checks for a real token before
- * sending anything, so nothing is posted to the wrong place in the meantime.
+ * Identity resolution is best-effort per platform (`publisher.fetchIdentity`):
+ * if a platform hasn't wired it yet, or the call fails, we store a placeholder
+ * externalId. The worker refuses to publish without a usable token, so nothing
+ * is posted to the wrong place in the meantime.
  */
 export async function GET(
   req: NextRequest,
@@ -55,15 +56,33 @@ export async function GET(
       redirectUri: redirectUriFor(p),
     });
 
-    const externalId = String(
-      (tokens.raw["account_id"] as string | undefined) ??
-        (tokens.raw["sub"] as string | undefined) ??
-        `pending_${p}`,
-    );
+    // Resolve the real account id + display name. If the platform hasn't wired
+    // identity resolution yet (or it fails), fall back to a placeholder — the
+    // worker still refuses to publish without a usable token/identity.
+    let externalId = `pending_${p}`;
+    let displayName = `${p} account`;
+    let metadata: Record<string, unknown> | undefined;
+    if (publisher.fetchIdentity) {
+      try {
+        const identity = await publisher.fetchIdentity(tokens.accessToken, tokens.raw);
+        externalId = identity.externalId;
+        displayName = identity.displayName;
+        metadata = identity.metadata;
+      } catch (idErr) {
+        console.warn(
+          `[oauth/${p}] identity resolution failed; storing placeholder:`,
+          idErr instanceof Error ? idErr.message : idErr,
+        );
+      }
+    }
+
+    const metaInput = (metadata ?? undefined) as unknown as Prisma.InputJsonValue | undefined;
 
     await prisma.socialAccount.upsert({
       where: { brandId_platform_externalId: { brandId: DEMO_BRAND_ID, platform: p, externalId } },
       update: {
+        displayName,
+        metadata: metaInput,
         accessToken: encryptToken(tokens.accessToken),
         refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
         tokenExpiresAt: tokens.expiresAt,
@@ -73,7 +92,8 @@ export async function GET(
         brandId: DEMO_BRAND_ID,
         platform: p,
         externalId,
-        displayName: `${p} account`,
+        displayName,
+        metadata: metaInput,
         accessToken: encryptToken(tokens.accessToken),
         refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
         tokenExpiresAt: tokens.expiresAt,

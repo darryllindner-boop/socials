@@ -14,7 +14,7 @@ import { Worker, type Job } from "bullmq";
 import { prisma } from "@/lib/db";
 import { getRedis, PUBLISH_QUEUE, REVIEW_QUEUE, type PublishJobData } from "@/lib/queue";
 import { getPublisher } from "@/server/publishers";
-import { decryptToken } from "@/server/crypto";
+import { getValidAccessToken } from "@/server/tokens";
 
 const connection = getRedis();
 
@@ -39,12 +39,16 @@ const publishWorker = new Worker<PublishJobData>(
       await fail(variantId, "No connected social account for this variant.");
       return;
     }
+    if (!variant.socialAccount.accessToken) {
+      await fail(variantId, `${variant.platform} account is not connected (no token).`);
+      return;
+    }
 
     await prisma.variant.update({ where: { id: variantId }, data: { status: "publishing" } });
     await event(variantId, "publishing");
 
     const account = variant.socialAccount;
-    const accessToken = account.accessToken ? decryptToken(account.accessToken) : "";
+    const accessToken = await getValidAccessToken(account);
     const publisher = getPublisher(variant.platform);
 
     try {

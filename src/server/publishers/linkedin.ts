@@ -2,7 +2,10 @@ import type { Platform } from "@/core/types";
 import {
   composeText,
   oauth2Exchange,
+  oauth2Refresh,
+  type AccountIdentity,
   type OAuthExchangeInput,
+  type OAuthRefreshInput,
   type OAuthStartInput,
   type OAuthTokens,
   type Publisher,
@@ -35,6 +38,40 @@ export class LinkedInPublisher implements Publisher {
 
   exchangeCode(input: OAuthExchangeInput): Promise<OAuthTokens> {
     return oauth2Exchange("https://www.linkedin.com/oauth/v2/accessToken", input);
+  }
+
+  refreshAccessToken(input: OAuthRefreshInput): Promise<OAuthTokens> {
+    // LinkedIn issues refresh tokens only to approved apps; same token endpoint.
+    return oauth2Refresh("https://www.linkedin.com/oauth/v2/accessToken", input);
+  }
+
+  /**
+   * Resolve the member identity via OpenID Connect userinfo. Returns the author
+   * URN used by the UGC Posts API (`urn:li:person:{sub}`).
+   */
+  async fetchIdentity(accessToken: string): Promise<AccountIdentity> {
+    const res = await fetch("https://api.linkedin.com/v2/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      throw new Error(`LinkedIn userinfo failed (${res.status}): ${await res.text()}`);
+    }
+    const me = (await res.json()) as {
+      sub?: string;
+      name?: string;
+      given_name?: string;
+      family_name?: string;
+    };
+    if (!me.sub) {
+      throw new Error("LinkedIn userinfo returned no subject id.");
+    }
+    const displayName =
+      me.name || [me.given_name, me.family_name].filter(Boolean).join(" ") || "LinkedIn member";
+    return {
+      externalId: `urn:li:person:${me.sub}`,
+      displayName,
+      metadata: { sub: me.sub },
+    };
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {

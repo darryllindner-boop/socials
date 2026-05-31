@@ -24,6 +24,23 @@ export interface OAuthExchangeInput {
   redirectUri: string;
 }
 
+export interface OAuthRefreshInput {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+/**
+ * The real identity of a connected account, resolved by calling the platform
+ * after token exchange. `externalId` is what `publish` posts as (e.g. a
+ * LinkedIn person URN or a Facebook Page id).
+ */
+export interface AccountIdentity {
+  externalId: string;
+  displayName: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface OAuthTokens {
   accessToken: string;
   refreshToken?: string;
@@ -64,6 +81,14 @@ export interface Publisher {
   authorizationUrl(input: OAuthStartInput): string;
   exchangeCode(input: OAuthExchangeInput): Promise<OAuthTokens>;
   publish(input: PublishInput): Promise<PublishResult>;
+  /**
+   * Resolve the connected account's real id + display name after token
+   * exchange. Optional: platforms that haven't implemented it fall back to a
+   * placeholder until wired (publishing is still guarded by a real token).
+   */
+  fetchIdentity?(accessToken: string, raw: Record<string, unknown>): Promise<AccountIdentity>;
+  /** Refresh an access token using a refresh token (platforms that support it). */
+  refreshAccessToken?(input: OAuthRefreshInput): Promise<OAuthTokens>;
 }
 
 /** Compose body + hashtags into a single string for platforms that inline tags. */
@@ -110,6 +135,41 @@ export async function oauth2Exchange(
   return {
     accessToken: String(raw.access_token ?? ""),
     refreshToken: typeof raw.refresh_token === "string" ? raw.refresh_token : undefined,
+    expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined,
+    raw,
+  };
+}
+
+/** Standard OAuth2 refresh-token grant (used by LinkedIn, X, ...). */
+export async function oauth2Refresh(
+  tokenUrl: string,
+  input: OAuthRefreshInput,
+  extraParams: Record<string, string> = {},
+): Promise<OAuthTokens> {
+  const params = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: input.refreshToken,
+    client_id: input.clientId,
+    client_secret: input.clientSecret,
+    ...extraParams,
+  });
+
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  const raw = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) {
+    throw new Error(`Token refresh failed (${res.status}): ${JSON.stringify(raw)}`);
+  }
+
+  const expiresIn = typeof raw.expires_in === "number" ? raw.expires_in : undefined;
+  return {
+    accessToken: String(raw.access_token ?? ""),
+    // Some providers rotate refresh tokens; keep the new one when present.
+    refreshToken: typeof raw.refresh_token === "string" ? raw.refresh_token : input.refreshToken,
     expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined,
     raw,
   };

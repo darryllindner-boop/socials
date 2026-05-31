@@ -5,7 +5,7 @@
  *
  * Run with: npm run db:seed
  */
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { MockLLMProvider } from "../src/core/llm/mock";
 import { generateVariants } from "../src/core/content/generator";
 import type { Brand as DomainBrand, BrandVoice } from "../src/core/types";
@@ -29,11 +29,11 @@ async function main(): Promise<void> {
 
   const brand = await prisma.brand.upsert({
     where: { id: "brand_demo" },
-    update: { name: "Fjord Roasters", voice: voice as object },
+    update: { name: "Fjord Roasters", voice: voice as unknown as Prisma.InputJsonValue },
     create: {
       id: "brand_demo",
       name: "Fjord Roasters",
-      voice: voice as object,
+      voice: voice as unknown as Prisma.InputJsonValue,
       assets: {
         create: [
           {
