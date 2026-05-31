@@ -33,3 +33,19 @@ export {
   nextReviewWindow,
 } from "./schedule/planner";
 export type { PlannerOptions } from "./schedule/planner";
+export { evaluateVariant } from "./eval/evaluator";
+export type {
+  EvalInput,
+  EvalIssue,
+  EvalResult,
+  EvalOptions,
+  EvalSeverity,
+} from "./eval/evaluator";
+export {
+  textSimilarity,
+  maxSimilarity,
+  shingles,
+  jaccard,
+  tokenize,
+} from "./eval/similarity";
+export type { SimilarityMatch } from "./eval/similarity";

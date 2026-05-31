@@ -131,9 +131,29 @@ the app is designed to be useful before they land.
 - **Phase 3 (done):** analytics pull-back (engagement metrics per platform),
   per-channel autonomy dial (manual / review-required / auto), and multi-account
   (multi-Page) selection for Meta.
-- **Phase 4:** X publishing once a paid tier is available; eval tooling
-  (repetition/off-brand detection); team/agency permissions; pgvector-backed
-  semantic RAG over brand assets.
+- **Phase 4 (in progress):** eval tooling (repetition + off-brand detection,
+  with autonomy gating) — **done**. Still to come: X publishing once a paid tier
+  is available; team/agency permissions; pgvector-backed semantic RAG.
+
+## Eval tool
+
+Every generated variant is scored against brand voice + recent post history
+*before* it enters the review queue (`src/core/eval`, dependency-free and
+verified by `npm run verify:core`). Checks include:
+
+- **Repetition** — word-shingle Jaccard similarity vs. the brand's recent posts
+  on the same platform; near-duplicates are blocked, similar ones warned.
+- **Banned terms** — literal phrases from `BrandVoice.bannedTerms` (hard block).
+- **Off-brand tone** — marketing-cliché/buzzword density.
+- **Unsupported claims** — health/finance/guarantee phrasing (warn).
+- **Emoji policy** — respects the brand's `emojiUsage`.
+- **Shouting / punctuation** — excessive ALL-CAPS or "!!!!".
+- **Template leakage** — `[placeholders]`, "as an AI", "lorem ipsum", etc. (block).
+
+Each variant gets a 0–1 quality score + issues, shown on its card with a
+"Re-check" button (re-runs after edits automatically). **Blocked content is held
+for human review even on `auto` channels** — that's the safety net that makes
+autonomy viable.
 
 ## Notes
 

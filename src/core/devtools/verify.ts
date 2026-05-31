@@ -14,6 +14,8 @@ import { generateVariants } from "../content/generator";
 import { applyReviewAction, groupForReview } from "../review/queue";
 import { planSchedule, nextReviewWindow } from "../schedule/planner";
 import { validateForPlatform } from "../content/platform-rules";
+import { evaluateVariant } from "../eval/evaluator";
+import { textSimilarity } from "../eval/similarity";
 import type { Brand, PostVariant } from "../types";
 
 let failures = 0;
@@ -156,6 +158,74 @@ async function main(): Promise<void> {
   check(
     "next review window is 07:00 Oslo (05:00 UTC) same day",
     review.toISOString() === "2026-06-01T05:00:00.000Z",
+  );
+
+  console.log("\n5) Eval tool: catch repetitive / off-brand content:");
+  const cleanText = "Bloom your grounds for 30 seconds before the main pour — it vents CO2 and makes the cup noticeably sweeter.";
+
+  const cleanEval = evaluateVariant({
+    platform: "linkedin",
+    body: cleanText,
+    hashtags: ["#coffee"],
+    voice: brand.voice,
+    priorTexts: ["Totally unrelated post about office furniture and standing desks."],
+  });
+  check("clean on-brand post is not blocked", !cleanEval.blocked);
+  check("clean post scores high", cleanEval.score >= 0.8);
+
+  const dupEval = evaluateVariant({
+    platform: "linkedin",
+    body: cleanText,
+    hashtags: [],
+    voice: brand.voice,
+    priorTexts: [cleanText], // identical to a recent post
+  });
+  check("near-duplicate of a recent post is blocked", dupEval.blocked);
+  check(
+    "duplicate raises a repetition issue",
+    dupEval.issues.some((i) => i.code === "repetition"),
+  );
+
+  const bannedVoice = { ...brand.voice, bannedTerms: ["CheapBeans"] };
+  const bannedEval = evaluateVariant({
+    platform: "x",
+    body: "Unlike CheapBeans, we roast fresh.",
+    hashtags: [],
+    voice: bannedVoice,
+  });
+  check("banned term is blocked", bannedEval.blocked);
+
+  const placeholderEval = evaluateVariant({
+    platform: "facebook",
+    body: "Try our [PRODUCT NAME] today!",
+    hashtags: [],
+    voice: brand.voice,
+  });
+  check("template/placeholder leakage is blocked", placeholderEval.blocked);
+
+  const buzzEval = evaluateVariant({
+    platform: "linkedin",
+    body: "Leverage our revolutionary game-changer to supercharge synergy and disrupt the paradigm.",
+    hashtags: [],
+    voice: brand.voice,
+  });
+  check("buzzword-heavy copy is flagged (not necessarily blocked)", buzzEval.issues.length > 0);
+
+  const emojiEval = evaluateVariant({
+    platform: "linkedin",
+    body: "New roast just dropped 🎉🔥☕🚀✨🌟",
+    hashtags: [],
+    voice: { ...brand.voice, emojiUsage: "none" },
+  });
+  check(
+    "emoji-free voice flags emoji usage",
+    emojiEval.issues.some((i) => i.code === "emoji_policy"),
+  );
+
+  check("identical texts are ~100% similar", textSimilarity(cleanText, cleanText) > 0.99);
+  check(
+    "unrelated texts are dissimilar",
+    textSimilarity(cleanText, "Quarterly tax filing tips for freelancers.") < 0.2,
   );
 
   console.log("");

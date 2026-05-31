@@ -7,6 +7,7 @@ import {
   applyAction,
   collectMetrics,
   generateBatch,
+  reevaluateVariant,
   scheduleApproved,
   scheduleVariant,
   setMedia,
@@ -121,4 +122,14 @@ export async function refreshMetricsAction(variantId: string): Promise<ActionRes
     return { ok: false, message: "No metrics yet (post may not be published or connected)." };
   }
   return { ok: true, message: "Metrics refreshed." };
+}
+
+export async function reevaluateAction(variantId: string): Promise<ActionResult> {
+  const result = await reevaluateVariant(variantId);
+  revalidatePath("/");
+  if (!result) {
+    return { ok: false, message: "Could not evaluate." };
+  }
+  const blocked = result.blocked ? " (blocked)" : "";
+  return { ok: true, message: `Re-checked: score ${Math.round(result.score * 100)}%${blocked}.` };
 }

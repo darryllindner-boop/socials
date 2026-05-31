@@ -4,13 +4,16 @@ import { useState, useTransition } from "react";
 import {
   approveAction,
   editAction,
+  reevaluateAction,
   refreshMetricsAction,
   rejectAction,
   scheduleVariantAction,
   setMediaAction,
 } from "@/app/actions";
 import { PLATFORM_RULES, type Platform, type PostStatus } from "@/core/types";
+import type { EvalResult } from "@/core/eval/evaluator";
 import type { PostMetrics } from "@/server/publishers/publisher";
+import { EvalBadge } from "./EvalBadge";
 import { PlatformBadge } from "./PlatformBadge";
 
 export interface VariantCardProps {
@@ -25,6 +28,8 @@ export interface VariantCardProps {
   topic: string;
   accountConnected: boolean;
   metrics: PostMetrics | null;
+  evalScore: number | null;
+  eval: EvalResult | null;
 }
 
 function defaultScheduleValue(): string {
@@ -140,6 +145,8 @@ export function VariantCard(props: VariantCardProps) {
           ⚠ {props.validationNote}
         </p>
       )}
+
+      {!editing && <EvalBadge result={props.eval} />}
       {!props.accountConnected && isReviewable && (
         <p className="mt-2 text-xs text-slate-400">
           Account not connected — you can approve/schedule now; publishing waits until you connect it.
@@ -217,6 +224,14 @@ export function VariantCard(props: VariantCardProps) {
             onClick={() => run(() => rejectAction(props.id))}
           >
             Reject
+          </button>
+          <button
+            className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            disabled={pending}
+            onClick={() => run(() => reevaluateAction(props.id))}
+            title="Re-run the eval tool"
+          >
+            Re-check
           </button>
         </div>
       )}

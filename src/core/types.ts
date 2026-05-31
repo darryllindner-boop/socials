@@ -71,6 +71,12 @@ export interface BrandVoice {
   emojiUsage: "none" | "sparing" | "liberal";
   /** Default call-to-action style, e.g. "invite a reply" or "link in comments". */
   ctaStyle?: string;
+  /**
+   * Literal words/phrases that must never appear (case-insensitive). Used by the
+   * eval tool to hard-block off-brand output (competitor names, forbidden
+   * claims, banned slang, etc.).
+   */
+  bannedTerms?: string[];
 }
 
 export interface BrandAsset {
