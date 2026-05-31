@@ -1,0 +1,152 @@
+// Social Autopilot - data model
+// Mirrors the domain types in src/core/types.ts and persists the full
+// generate -> review -> schedule -> publish lifecycle.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  linkedin
+  facebook
+  x
+  instagram
+}
+
+enum AutonomyLevel {
+  manual
+  review_required
+  auto
+}
+
+enum PostStatus {
+  draft
+  pending_review
+  approved
+  scheduled
+  publishing
+  published
+  rejected
+  failed
+}
+
+// The brand whose social presence we manage (internal tool: usually one).
+model Brand {
+  id        String   @id @default(cuid())
+  name      String
+  // Structured brand voice (see BrandVoice in src/core/types.ts).
+  voice     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assets         BrandAsset[]
+  socialAccounts SocialAccount[]
+  posts          Post[]
+}
+
+// Lightweight RAG corpus. In production the `content` is also embedded into a
+// pgvector column for semantic retrieval (see README "RAG" section).
+model BrandAsset {
+  id        String   @id @default(cuid())
+  brandId   String
+  title     String
+  content   String
+  tags      String[] @default([])
+  createdAt DateTime @default(now())
+
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([brandId])
+}
+
+// A connected social account, including OAuth tokens (encrypted at rest).
+model SocialAccount {
+  id            String        @id @default(cuid())
+  brandId       String
+  platform      Platform
+  // Human-readable handle/name for the dashboard.
+  displayName   String
+  // Platform's own id for the account/page we post to.
+  externalId    String
+  autonomy      AutonomyLevel @default(review_required)
+  // Encrypted token material (never store plaintext). See src/server/oauth.
+  accessToken   String?
+  refreshToken  String?
+  tokenExpiresAt DateTime?
+  // Arbitrary platform metadata (e.g. Facebook Page id, IG business id).
+  metadata      Json?
+  connectedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  brand    Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  variants Variant[]
+
+  @@unique([brandId, platform, externalId])
+  @@index([brandId])
+}
+
+// A content idea that fans out into one Variant per target platform.
+model Post {
+  id          String   @id @default(cuid())
+  brandId     String
+  topic       String
+  instruction String?
+  // Snapshot of which LLM produced this batch, for evaluation.
+  llmProvider String?
+  llmModel    String?
+  createdAt   DateTime @default(now())
+
+  brand    Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  variants Variant[]
+
+  @@index([brandId, createdAt])
+}
+
+// Per-platform content, carrying its own review/publish status.
+model Variant {
+  id              String      @id @default(cuid())
+  postId          String
+  socialAccountId String?
+  platform        Platform
+  status          PostStatus  @default(pending_review)
+  body            String
+  hashtags        String[]    @default([])
+  // Reviewer-facing validation notes (e.g. "exceeds X length").
+  validationNote  String?
+  scheduledFor    DateTime?
+  publishedAt     DateTime?
+  externalId      String?
+  error           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  post          Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount? @relation(fields: [socialAccountId], references: [id])
+  events        VariantEvent[]
+
+  @@index([status, scheduledFor])
+  @@index([postId])
+}
+
+// Append-only audit trail of every status change / reviewer action.
+model VariantEvent {
+  id        String   @id @default(cuid())
+  variantId String
+  // e.g. "generated", "approved", "edited", "rejected", "scheduled",
+  // "publishing", "published", "failed".
+  type      String
+  // Optional human actor; null for automated transitions.
+  actor     String?
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([variantId, createdAt])
+}

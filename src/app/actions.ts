@@ -1,0 +1,77 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { PLATFORMS } from "@/core/types";
+import { applyAction, generateBatch, scheduleApproved, scheduleVariant } from "@/server/service";
+
+const platformSchema = z.enum(PLATFORMS);
+
+const generateSchema = z.object({
+  topic: z.string().min(3, "Give the post a topic (at least 3 characters)."),
+  instruction: z.string().optional(),
+  platforms: z.array(platformSchema).min(1, "Pick at least one platform."),
+});
+
+export interface ActionResult {
+  ok: boolean;
+  message?: string;
+}
+
+export async function generateAction(formData: FormData): Promise<ActionResult> {
+  const parsed = generateSchema.safeParse({
+    topic: formData.get("topic"),
+    instruction: formData.get("instruction") || undefined,
+    platforms: formData.getAll("platforms"),
+  });
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const { count } = await generateBatch(parsed.data);
+  revalidatePath("/");
+  return { ok: true, message: `Generated ${count} draft(s) into the review queue.` };
+}
+
+export async function approveAction(variantId: string): Promise<ActionResult> {
+  await applyAction(variantId, { type: "approve" });
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function rejectAction(variantId: string): Promise<ActionResult> {
+  await applyAction(variantId, { type: "reject" });
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function editAction(
+  variantId: string,
+  body: string,
+  hashtags: string[],
+): Promise<ActionResult> {
+  await applyAction(variantId, { type: "edit", body, hashtags });
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function scheduleVariantAction(
+  variantId: string,
+  scheduledFor: string,
+): Promise<ActionResult> {
+  const when = new Date(scheduledFor);
+  if (Number.isNaN(when.getTime())) {
+    return { ok: false, message: "Invalid date/time." };
+  }
+  await scheduleVariant(variantId, when);
+  revalidatePath("/");
+  return { ok: true, message: `Scheduled for ${when.toLocaleString()}.` };
+}
+
+export async function scheduleAllApprovedAction(): Promise<ActionResult> {
+  const { scheduled, unscheduled } = await scheduleApproved();
+  revalidatePath("/");
+  const note =
+    unscheduled > 0 ? ` (${unscheduled} left for tomorrow — not enough slots)` : "";
+  return { ok: true, message: `Scheduled ${scheduled} post(s)${note}.` };
+}
