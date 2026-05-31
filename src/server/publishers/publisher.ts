@@ -34,11 +34,21 @@ export interface OAuthRefreshInput {
  * The real identity of a connected account, resolved by calling the platform
  * after token exchange. `externalId` is what `publish` posts as (e.g. a
  * LinkedIn person URN or a Facebook Page id).
+ *
+ * `accessToken` is an optional override: some platforms publish with a token
+ * that differs from the one returned by the OAuth code exchange. For Meta, the
+ * code exchange yields a *user* token, but posting to a Page requires the
+ * *Page* access token discovered during identity resolution — so fetchIdentity
+ * returns it here and the callback stores it in place of the user token.
  */
 export interface AccountIdentity {
   externalId: string;
   displayName: string;
   metadata?: Record<string, unknown>;
+  /** Token to store/publish with, if different from the OAuth-exchange token. */
+  accessToken?: string;
+  /** Expiry of the override token (Page tokens from long-lived user tokens don't expire). */
+  tokenExpiresAt?: Date;
 }
 
 export interface OAuthTokens {

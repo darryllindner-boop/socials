@@ -1,6 +1,7 @@
 import type { Platform } from "@/core/types";
 import {
   composeText,
+  type AccountIdentity,
   type OAuthExchangeInput,
   type OAuthStartInput,
   type OAuthTokens,
@@ -8,7 +9,7 @@ import {
   type PublishInput,
   type PublishResult,
 } from "./publisher";
-import { FacebookPublisher } from "./facebook";
+import { FacebookPublisher, pickPage } from "./facebook";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
@@ -19,9 +20,9 @@ const GRAPH = "https://graph.facebook.com/v21.0";
  * Meta app with `instagram_content_publish` (App Review required).
  *
  * IMPORTANT: Instagram has no text-only posts. Publishing is a two-step flow
- * (create media container -> publish), so `mediaUrls[0]` is required. Until the
- * media pipeline (Phase 2) is wired, text-only variants surface a clear,
- * non-destructive error rather than a fake success.
+ * (create media container -> publish), so `mediaUrls[0]` is required. Variants
+ * without media surface a clear, non-destructive error rather than a fake
+ * success — attach an image URL on the variant in the review queue first.
  */
 export class InstagramPublisher implements Publisher {
   readonly platform: Platform = "instagram";
@@ -45,6 +46,30 @@ export class InstagramPublisher implements Publisher {
     return this.fb.exchangeCode(input);
   }
 
+  /**
+   * Find the IG Business/Creator account linked to one of the user's Pages.
+   * Publishing uses the *Page* access token, and `externalId` is the IG user id.
+   */
+  async fetchIdentity(accessToken: string): Promise<AccountIdentity> {
+    const pages = await this.fb.listManagedPages(accessToken);
+    const withIg = pages.filter((p) => p.instagram_business_account?.id);
+    if (withIg.length === 0) {
+      throw new Error(
+        "No Instagram Business account linked to your Pages. Link an IG Business/Creator account to a Facebook Page in Meta settings.",
+      );
+    }
+    // Honour META_PAGE_ID if it points at an IG-linked page; else first IG-linked page.
+    const page = pickPage(withIg) ?? withIg[0]!;
+    const ig = page.instagram_business_account!;
+    return {
+      externalId: ig.id,
+      displayName: ig.username ? `@${ig.username}` : "Instagram account",
+      // Publish with the Page token; it authorises the linked IG account too.
+      accessToken: page.access_token,
+      metadata: { pageId: page.id, igUserId: ig.id, username: ig.username },
+    };
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     if (!input.accessToken) {
       return { ok: false, notConfigured: true, error: "Instagram account not connected." };
@@ -54,7 +79,7 @@ export class InstagramPublisher implements Publisher {
       return {
         ok: false,
         notConfigured: true,
-        error: "Instagram requires an image/video. Attach media (Phase 2) before publishing.",
+        error: "Instagram requires an image/video. Attach an image URL on the variant before publishing.",
       };
     }
 

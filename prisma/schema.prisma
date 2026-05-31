@@ -119,6 +119,8 @@ model Variant {
   hashtags        String[]    @default([])
   // Reviewer-facing validation notes (e.g. "exceeds X length").
   validationNote  String?
+  // Media attached to this variant (image/video URLs). Required for Instagram.
+  mediaUrls       String[]    @default([])
   scheduledFor    DateTime?
   publishedAt     DateTime?
   externalId      String?

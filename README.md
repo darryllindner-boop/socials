@@ -123,17 +123,26 @@ the app is designed to be useful before they land.
 
 - **Phase 0 (this scaffold):** generation → review queue → scheduling; publisher
   + OAuth scaffolding; offline-verifiable core.
-- **Phase 1 (in progress):** LinkedIn OAuth identity resolution (person URN via
-  OpenID userinfo) + token refresh + member-share publishing. Analytics
-  pull-back still to come.
-- **Phase 2:** Meta (FB/IG) publish incl. media pipeline & templates.
+- **Phase 1 (done):** LinkedIn OAuth identity resolution (person URN via OpenID
+  userinfo) + token refresh + member-share publishing.
+- **Phase 2 (in progress):** Meta (Facebook + Instagram) — long-lived user
+  tokens, Page-token identity resolution via `/me/accounts`, IG business-account
+  discovery, and the Instagram media pipeline (attach image URLs in the queue).
+  Analytics pull-back still to come.
 - **Phase 3:** autonomy dial per channel, eval tooling (repetition/off-brand
   detection), team/agency permissions.
-- **Phase 4:** additional channels as approvals land; pgvector-backed semantic
-  RAG over brand assets.
+- **Phase 4:** X publishing once a paid tier is available; pgvector-backed
+  semantic RAG over brand assets.
 
 ## Notes
 
+- **Meta token model:** the OAuth code exchange yields a short-lived user token,
+  which is upgraded to a long-lived one; publishing then uses the **Page access
+  token** discovered during identity resolution (Page tokens from long-lived
+  user tokens don't expire). Set `META_PAGE_ID` to target a specific Page.
+- **Instagram** has no text-only posts — attach a public image URL to a variant
+  in the review queue before approving (the card shows an "Image…" control and
+  flags IG variants that still need media).
 - OAuth tokens are encrypted at rest (AES-256-GCM) and auto-refreshed before
   publishing via `src/server/tokens.ts` when the platform supports it.
 - `src/core/brand/voice.ts` uses lexical keyword matching as a stand-in for the

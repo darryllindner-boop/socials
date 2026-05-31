@@ -82,6 +82,7 @@ export interface ReviewQueueItem {
   status: PostStatus;
   body: string;
   hashtags: string[];
+  mediaUrls: string[];
   validationNote: string | null;
   scheduledFor: string | null;
   topic: string;
@@ -109,6 +110,7 @@ export async function getReviewQueue(brandId: string = DEMO_BRAND_ID): Promise<{
     status: v.status,
     body: v.body,
     hashtags: v.hashtags,
+    mediaUrls: v.mediaUrls,
     validationNote: v.validationNote,
     scheduledFor: v.scheduledFor ? v.scheduledFor.toISOString() : null,
     topic: v.post.topic,
@@ -188,6 +190,25 @@ export async function applyAction(
   }
 
   return toCoreVariant(updated);
+}
+
+/**
+ * Attach (or clear) media URLs on a variant. Instagram requires at least one
+ * image/video; this is how a reviewer satisfies that before approving. Basic
+ * http(s) validation only — hosting/upload is out of scope for now.
+ */
+export async function setMedia(variantId: string, urls: string[]): Promise<void> {
+  const cleaned = urls
+    .map((u) => u.trim())
+    .filter((u) => /^https?:\/\/\S+$/i.test(u));
+
+  await prisma.variant.update({
+    where: { id: variantId },
+    data: { mediaUrls: cleaned },
+  });
+  await prisma.variantEvent.create({
+    data: { variantId, type: "media_set", actor: "reviewer", detail: { count: cleaned.length } },
+  });
 }
 
 /**

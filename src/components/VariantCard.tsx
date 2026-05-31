@@ -6,6 +6,7 @@ import {
   editAction,
   rejectAction,
   scheduleVariantAction,
+  setMediaAction,
 } from "@/app/actions";
 import { PLATFORM_RULES, type Platform, type PostStatus } from "@/core/types";
 import { PlatformBadge } from "./PlatformBadge";
@@ -16,6 +17,7 @@ export interface VariantCardProps {
   status: PostStatus;
   body: string;
   hashtags: string[];
+  mediaUrls: string[];
   validationNote: string | null;
   scheduledFor: string | null;
   topic: string;
@@ -38,11 +40,15 @@ export function VariantCard(props: VariantCardProps) {
   const [tags, setTags] = useState(props.hashtags.join(" "));
   const [scheduleAt, setScheduleAt] = useState(defaultScheduleValue());
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showMedia, setShowMedia] = useState(false);
+  const [mediaUrl, setMediaUrl] = useState(props.mediaUrls[0] ?? "");
   const [error, setError] = useState<string | null>(null);
 
   const rule = PLATFORM_RULES[props.platform];
   const length = body.length + (tags ? tags.length + 1 : 0);
   const overLimit = length > rule.maxLength;
+  const hasMedia = props.mediaUrls.length > 0;
+  const needsMedia = props.platform === "instagram" && !hasMedia;
 
   const run = (fn: () => Promise<{ ok: boolean; message?: string }>) =>
     startTransition(async () => {
@@ -110,6 +116,19 @@ export function VariantCard(props: VariantCardProps) {
         <>
           <p className="whitespace-pre-wrap text-sm text-slate-800">{body}</p>
           {tags && <p className="mt-2 text-sm text-brand-600">{tags}</p>}
+          {hasMedia && (
+            <div className="mt-2 flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={props.mediaUrls[0]}
+                alt="attached media"
+                className="h-16 w-16 rounded-md border border-slate-200 object-cover"
+              />
+              <span className="text-xs text-slate-400">
+                {props.mediaUrls.length} media attached
+              </span>
+            </div>
+          )}
         </>
       )}
 
@@ -121,6 +140,11 @@ export function VariantCard(props: VariantCardProps) {
       {!props.accountConnected && isReviewable && (
         <p className="mt-2 text-xs text-slate-400">
           Account not connected — you can approve/schedule now; publishing waits until you connect it.
+        </p>
+      )}
+      {needsMedia && (
+        <p className="mt-2 rounded-md bg-pink-50 px-2 py-1 text-xs text-pink-700">
+          Instagram needs an image to publish. Use “Image…” to attach one.
         </p>
       )}
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
@@ -150,6 +174,13 @@ export function VariantCard(props: VariantCardProps) {
           <button
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
             disabled={pending}
+            onClick={() => setShowMedia((s) => !s)}
+          >
+            Image…
+          </button>
+          <button
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            disabled={pending}
             onClick={() => setShowSchedule((s) => !s)}
           >
             Schedule…
@@ -169,11 +200,58 @@ export function VariantCard(props: VariantCardProps) {
           <button
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
             disabled={pending}
+            onClick={() => setShowMedia((s) => !s)}
+          >
+            Image…
+          </button>
+          <button
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            disabled={pending}
             onClick={() => setShowSchedule((s) => !s)}
           >
             Schedule…
           </button>
           <span className="text-xs text-emerald-700">Approved</span>
+        </div>
+      )}
+
+      {showMedia && (isReviewable || props.status === "approved") && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            type="url"
+            className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 p-1.5 text-sm"
+            value={mediaUrl}
+            onChange={(e) => setMediaUrl(e.target.value)}
+            placeholder="https://…/image.jpg (public URL)"
+          />
+          <button
+            className="rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            disabled={pending}
+            onClick={() =>
+              run(async () => {
+                const urls = mediaUrl.trim() ? [mediaUrl.trim()] : [];
+                const res = await setMediaAction(props.id, urls);
+                if (res.ok) setShowMedia(false);
+                return res;
+              })
+            }
+          >
+            Save image
+          </button>
+          {hasMedia && (
+            <button
+              className="rounded-lg px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+              disabled={pending}
+              onClick={() =>
+                run(async () => {
+                  setMediaUrl("");
+                  return setMediaAction(props.id, []);
+                })
+              }
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
 

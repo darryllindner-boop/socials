@@ -58,6 +58,7 @@ const publishWorker = new Worker<PublishJobData>(
         accessToken,
         externalId: account.externalId,
         metadata: (account.metadata as Record<string, unknown>) ?? undefined,
+        mediaUrls: variant.mediaUrls,
       });
 
       if (result.ok) {

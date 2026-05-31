@@ -62,12 +62,20 @@ export async function GET(
     let externalId = `pending_${p}`;
     let displayName = `${p} account`;
     let metadata: Record<string, unknown> | undefined;
+    // Default to the OAuth-exchange token; identity resolution may override it
+    // (e.g. Meta returns a Page access token to publish with).
+    let publishToken = tokens.accessToken;
+    let tokenExpiresAt = tokens.expiresAt;
     if (publisher.fetchIdentity) {
       try {
         const identity = await publisher.fetchIdentity(tokens.accessToken, tokens.raw);
         externalId = identity.externalId;
         displayName = identity.displayName;
         metadata = identity.metadata;
+        if (identity.accessToken) {
+          publishToken = identity.accessToken;
+          tokenExpiresAt = identity.tokenExpiresAt;
+        }
       } catch (idErr) {
         console.warn(
           `[oauth/${p}] identity resolution failed; storing placeholder:`,
@@ -83,9 +91,9 @@ export async function GET(
       update: {
         displayName,
         metadata: metaInput,
-        accessToken: encryptToken(tokens.accessToken),
+        accessToken: encryptToken(publishToken),
         refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
-        tokenExpiresAt: tokens.expiresAt,
+        tokenExpiresAt,
         connectedAt: new Date(),
       },
       create: {
@@ -94,9 +102,9 @@ export async function GET(
         externalId,
         displayName,
         metadata: metaInput,
-        accessToken: encryptToken(tokens.accessToken),
+        accessToken: encryptToken(publishToken),
         refreshToken: tokens.refreshToken ? encryptToken(tokens.refreshToken) : null,
-        tokenExpiresAt: tokens.expiresAt,
+        tokenExpiresAt,
         connectedAt: new Date(),
       },
     });

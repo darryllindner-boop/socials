@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { PLATFORMS } from "@/core/types";
-import { applyAction, generateBatch, scheduleApproved, scheduleVariant } from "@/server/service";
+import { applyAction, generateBatch, scheduleApproved, scheduleVariant, setMedia } from "@/server/service";
 
 const platformSchema = z.enum(PLATFORMS);
 
@@ -53,6 +53,15 @@ export async function editAction(
   await applyAction(variantId, { type: "edit", body, hashtags });
   revalidatePath("/");
   return { ok: true };
+}
+
+export async function setMediaAction(
+  variantId: string,
+  urls: string[],
+): Promise<ActionResult> {
+  await setMedia(variantId, urls);
+  revalidatePath("/");
+  return { ok: true, message: urls.length > 0 ? "Media attached." : "Media cleared." };
 }
 
 export async function scheduleVariantAction(
