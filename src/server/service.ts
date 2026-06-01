@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { getLLMProvider } from "@/lib/llm";
 import { enqueuePublish } from "@/lib/queue";
+import { asPlatform, asPostStatus, packList, unpackList } from "@/lib/serialize";
 import { generateVariants } from "@/core/content/generator";
 import { applyReviewAction, type ReviewAction } from "@/core/review/queue";
 import { planSchedule } from "@/core/schedule/planner";
@@ -44,7 +45,7 @@ async function loadDomainBrand(brandId: string): Promise<Brand> {
       id: a.id,
       title: a.title,
       content: a.content,
-      tags: a.tags,
+      tags: unpackList(a.tags),
     })),
   };
 }
@@ -95,7 +96,7 @@ export async function generateBatch(input: {
           platform: v.platform,
           status: v.status,
           body: v.body,
-          hashtags: v.hashtags,
+          hashtags: packList(v.hashtags),
           validationNote: v.error,
           evalScore: result.score,
           evalIssues: result as unknown as Prisma.InputJsonValue,
@@ -121,8 +122,9 @@ export async function generateBatch(input: {
   const autoPlatforms = await getAutoPlatforms(brandId);
   const approvedCore: PostVariant[] = [];
   for (const v of post.variants) {
-    if (!autoPlatforms.has(v.platform)) continue;
-    if (blockedByPlatform.get(v.platform)) {
+    const platform = asPlatform(v.platform);
+    if (!autoPlatforms.has(platform)) continue;
+    if (blockedByPlatform.get(platform)) {
       await prisma.variantEvent.create({
         data: {
           variantId: v.id,
@@ -152,7 +154,7 @@ async function getAutoPlatforms(brandId: string): Promise<Set<Platform>> {
     where: { brandId, isActive: true, autonomy: "auto" },
     select: { platform: true },
   });
-  return new Set(accounts.map((a) => a.platform));
+  return new Set(accounts.map((a) => asPlatform(a.platform)));
 }
 
 /**
@@ -231,11 +233,11 @@ export async function getReviewQueue(brandId: string = DEMO_BRAND_ID): Promise<{
 
   const map = (v: (typeof variants)[number]): ReviewQueueItem => ({
     id: v.id,
-    platform: v.platform,
-    status: v.status,
+    platform: asPlatform(v.platform),
+    status: asPostStatus(v.status),
     body: v.body,
-    hashtags: v.hashtags,
-    mediaUrls: v.mediaUrls,
+    hashtags: unpackList(v.hashtags),
+    mediaUrls: unpackList(v.mediaUrls),
     validationNote: v.validationNote,
     scheduledFor: v.scheduledFor ? v.scheduledFor.toISOString() : null,
     topic: v.post.topic,
@@ -265,18 +267,18 @@ export async function getReviewQueue(brandId: string = DEMO_BRAND_ID): Promise<{
 /** Build the core PostVariant view of a DB row so we can reuse the state machine. */
 function toCoreVariant(row: {
   id: string;
-  platform: Platform;
-  status: PostStatus;
+  platform: string;
+  status: string;
   body: string;
-  hashtags: string[];
+  hashtags: string;
   scheduledFor: Date | null;
 }): PostVariant {
   return {
     id: row.id,
-    platform: row.platform,
-    status: row.status,
+    platform: asPlatform(row.platform),
+    status: asPostStatus(row.status),
     body: row.body,
-    hashtags: row.hashtags,
+    hashtags: unpackList(row.hashtags),
     scheduledFor: row.scheduledFor?.toISOString(),
   };
 }
@@ -298,7 +300,7 @@ export async function applyAction(
     data: {
       status: next.status,
       body: next.body,
-      hashtags: next.hashtags,
+      hashtags: packList(next.hashtags),
       scheduledFor: next.scheduledFor ? new Date(next.scheduledFor) : row.scheduledFor,
       validationNote: action.type === "edit" ? null : row.validationNote,
     },
@@ -339,10 +341,10 @@ export async function reevaluateVariant(variantId: string): Promise<EvalResult |
 
   const result = await evaluateText({
     brandId: row.post.brandId,
-    platform: row.platform,
+    platform: asPlatform(row.platform),
     voice,
     body: row.body,
-    hashtags: row.hashtags,
+    hashtags: unpackList(row.hashtags),
     excludeVariantId: variantId,
   });
 
@@ -368,7 +370,7 @@ export async function setMedia(variantId: string, urls: string[]): Promise<void>
 
   await prisma.variant.update({
     where: { id: variantId },
-    data: { mediaUrls: cleaned },
+    data: { mediaUrls: packList(cleaned) },
   });
   await prisma.variantEvent.create({
     data: { variantId, type: "media_set", actor: "reviewer", detail: { count: cleaned.length } },
@@ -398,7 +400,7 @@ export async function scheduleVariant(variantId: string, when: Date): Promise<vo
     data: {
       status: scheduled.status,
       scheduledFor: when,
-      socialAccountId: await getActiveAccountId(DEMO_BRAND_ID, row.platform),
+      socialAccountId: await getActiveAccountId(DEMO_BRAND_ID, asPlatform(row.platform)),
     },
   });
   await prisma.variantEvent.create({
@@ -442,10 +444,17 @@ export async function collectMetrics(variantId: string): Promise<PostMetrics | n
   if (!variant || variant.status !== "published" || !variant.externalId) return null;
   if (!variant.socialAccount?.accessToken) return null;
 
-  const publisher = getPublisher(variant.platform);
+  const publisher = getPublisher(asPlatform(variant.platform));
   if (!publisher.fetchMetrics) return null;
 
-  const accessToken = await getValidAccessToken(variant.socialAccount);
+  const account = variant.socialAccount;
+  const accessToken = await getValidAccessToken({
+    id: account.id,
+    platform: asPlatform(account.platform),
+    accessToken: account.accessToken,
+    refreshToken: account.refreshToken,
+    tokenExpiresAt: account.tokenExpiresAt,
+  });
   const metrics = await publisher.fetchMetrics({
     accessToken,
     accountExternalId: variant.socialAccount.externalId,

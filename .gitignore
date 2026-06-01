@@ -34,3 +34,17 @@ next-env.d.ts.bak
 # prisma
 /prisma/*.db
 /prisma/*.db-journal
+
+
+# SQLite (desktop build) — local database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# desktop build output (Electron + electron-builder)
+/dist-desktop/
+/dist-standalone/
+
+# electron-builder optional brand assets cache
+/build/.cache/

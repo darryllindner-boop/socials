@@ -1,12 +1,12 @@
-// Run the web app and the background worker together in one terminal.
+// Run the web app for local development. The background scheduler now runs
+// IN-PROCESS inside the Next.js server (see src/instrumentation.ts), so there is
+// no separate worker to launch here — running one alongside the embedded
+// scheduler would double-publish. Kept as a script for compatibility with docs.
 // Cross-platform (uses shell: true so `npm` resolves to npm.cmd on Windows).
-// Ctrl+C stops both.
+// Ctrl+C stops it.
 import { spawn } from "node:child_process";
 
-const targets = [
-  { name: "web", args: ["run", "dev"] },
-  { name: "worker", args: ["run", "worker"] },
-];
+const targets = [{ name: "web", args: ["run", "dev"] }];
 
 const children = targets.map((t) => {
   const child = spawn("npm", t.args, { stdio: "inherit", shell: true });

@@ -1,0 +1,183 @@
+// Social Autopilot - SQLite data model (desktop build).
+//
+// This is the schema used by the Windows desktop app. It mirrors the Postgres
+// schema in `schema.prisma` but adapts it to SQLite's capabilities:
+//
+//   * SQLite has no native ENUM type      -> enums become `String` (the allowed
+//                                            values still live in src/core/types.ts
+//                                            and are enforced in code).
+//   * SQLite has no scalar-list type      -> `String[]` columns (tags, hashtags,
+//                                            mediaUrls) become a single `String`
+//                                            holding a JSON-encoded array. The
+//                                            (de)serialization lives in
+//                                            src/lib/serialize.ts.
+//   * `Json` IS supported on SQLite        -> voice/metadata/eval/metrics/detail
+//     (Prisma 5+/6, stored as TEXT)         stay as `Json`.
+//
+// The desktop build points Prisma at this file via the `prisma.schema` field in
+// package.json. Generate with:
+//   npm run db:generate      (prisma generate --schema prisma/schema.sqlite.prisma)
+// and create the local database with:
+//   npm run db:push          (prisma db push   --schema prisma/schema.sqlite.prisma)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// NOTE: enums are intentionally omitted (unsupported on SQLite). The canonical
+// value sets are PLATFORMS / POST_STATUSES / AUTONOMY_LEVELS in src/core/types.ts.
+
+// The brand whose social presence we manage (internal tool: usually one).
+model Brand {
+  id        String   @id @default(cuid())
+  name      String
+  // Structured brand voice (see BrandVoice in src/core/types.ts). JSON on SQLite.
+  voice     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assets         BrandAsset[]
+  socialAccounts SocialAccount[]
+  posts          Post[]
+}
+
+// Lightweight RAG corpus. In production the `content` is also embedded into a
+// vector column for semantic retrieval (see README "RAG" section).
+model BrandAsset {
+  id        String   @id @default(cuid())
+  brandId   String
+  title     String
+  content   String
+  // JSON-encoded string[] (see serialize.ts: packList / unpackList).
+  tags      String   @default("[]")
+  createdAt DateTime @default(now())
+
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([brandId])
+}
+
+// A connected social account, including OAuth tokens (encrypted at rest).
+model SocialAccount {
+  id             String    @id @default(cuid())
+  brandId        String
+  // Platform enum value: "linkedin" | "facebook" | "x" | "instagram".
+  platform       String
+  // Human-readable handle/name for the dashboard.
+  displayName    String
+  // Platform's own id for the account/page we post to.
+  externalId     String
+  // AutonomyLevel: "manual" | "review_required" | "auto".
+  autonomy       String    @default("review_required")
+  // Whether this is the account used to publish for its platform. At most one
+  // active account per (brand, platform); used to support multi-Page selection.
+  isActive       Boolean   @default(true)
+  // Encrypted token material (never store plaintext). See src/server/crypto.
+  accessToken    String?
+  refreshToken   String?
+  tokenExpiresAt DateTime?
+  // Arbitrary platform metadata (e.g. Facebook Page id, IG business id).
+  metadata       Json?
+  connectedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  brand    Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  variants Variant[]
+
+  @@unique([brandId, platform, externalId])
+  @@index([brandId])
+}
+
+// A content idea that fans out into one Variant per target platform.
+model Post {
+  id          String   @id @default(cuid())
+  brandId     String
+  topic       String
+  instruction String?
+  // Snapshot of which LLM produced this batch, for evaluation.
+  llmProvider String?
+  llmModel    String?
+  createdAt   DateTime @default(now())
+
+  brand    Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  variants Variant[]
+
+  @@index([brandId, createdAt])
+}
+
+// Per-platform content, carrying its own review/publish status.
+model Variant {
+  id               String    @id @default(cuid())
+  postId           String
+  socialAccountId  String?
+  // Platform enum value (see SocialAccount.platform).
+  platform         String
+  // PostStatus: draft | pending_review | approved | scheduled | publishing |
+  // published | rejected | failed.
+  status           String    @default("pending_review")
+  body             String
+  // JSON-encoded string[] (serialize.ts).
+  hashtags         String    @default("[]")
+  // Reviewer-facing validation notes (e.g. "exceeds X length").
+  validationNote   String?
+  // Eval tool output: 0..1 quality score + structured issues (see core/eval).
+  evalScore        Float?
+  evalIssues       Json?
+  // Media attached to this variant (image/video URLs). Required for Instagram.
+  // JSON-encoded string[] (serialize.ts).
+  mediaUrls        String    @default("[]")
+  scheduledFor     DateTime?
+  publishedAt      DateTime?
+  externalId       String?
+  error            String?
+  // Latest engagement snapshot (likes/comments/etc.); see PostMetrics.
+  metrics          Json?
+  metricsUpdatedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  post            Post                    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount?          @relation(fields: [socialAccountId], references: [id])
+  events          VariantEvent[]
+  metricSnapshots VariantMetricSnapshot[]
+
+  @@index([status, scheduledFor])
+  @@index([postId])
+}
+
+// Time-series of engagement metrics for a published variant, so we can show
+// trends and feed future generation/evaluation.
+model VariantMetricSnapshot {
+  id         String   @id @default(cuid())
+  variantId  String
+  // Normalised metrics payload (see PostMetrics in the publisher layer).
+  data       Json
+  capturedAt DateTime @default(now())
+
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([variantId, capturedAt])
+}
+
+// Append-only audit trail of every status change / reviewer action.
+model VariantEvent {
+  id        String   @id @default(cuid())
+  variantId String
+  // e.g. "generated", "approved", "edited", "rejected", "scheduled",
+  // "publishing", "published", "failed".
+  type      String
+  // Optional human actor; null for automated transitions.
+  actor     String?
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([variantId, createdAt])
+}
