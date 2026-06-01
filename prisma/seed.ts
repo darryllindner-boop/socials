@@ -13,7 +13,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { MockLLMProvider } from "../src/core/llm/mock";
 import { generateVariants } from "../src/core/content/generator";
 import { evaluateVariant } from "../src/core/eval/evaluator";
-import { packList } from "../src/lib/serialize";
+import { packList, unpackList } from "../src/lib/serialize";
 import type { Brand as DomainBrand, BrandVoice } from "../src/core/types";
 
 const prisma = new PrismaClient();
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
       id: a.id,
       title: a.title,
       content: a.content,
-      tags: a.tags,
+      tags: unpackList(a.tags),
     })),
   };
 
