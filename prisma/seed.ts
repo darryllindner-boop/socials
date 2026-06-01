@@ -13,6 +13,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { MockLLMProvider } from "../src/core/llm/mock";
 import { generateVariants } from "../src/core/content/generator";
 import { evaluateVariant } from "../src/core/eval/evaluator";
+import { packList } from "../src/lib/serialize";
 import type { Brand as DomainBrand, BrandVoice } from "../src/core/types";
 
 const prisma = new PrismaClient();
@@ -45,13 +46,13 @@ async function main(): Promise<void> {
             title: "Pour-over ratio",
             content:
               "Our house pour-over ratio is 1:16 (60g coffee per litre). Bloom for 30s with double the coffee weight in water.",
-            tags: ["brewing", "pour-over", "ratio"],
+            tags: packList(["brewing", "pour-over", "ratio"]),
           },
           {
             title: "Ethiopia Guji origin",
             content:
               "Our Ethiopia Guji is washed, with notes of jasmine and bergamot. Sourced from a co-op of 200 smallholders.",
-            tags: ["origin", "ethiopia"],
+            tags: packList(["origin", "ethiopia"]),
           },
         ],
       },
@@ -105,7 +106,7 @@ async function main(): Promise<void> {
             platform: v.platform,
             status: v.status,
             body: v.body,
-            hashtags: v.hashtags,
+            hashtags: packList(v.hashtags),
             validationNote: v.error,
             evalScore: result.score,
             evalIssues: result as unknown as Prisma.InputJsonValue,

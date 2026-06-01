@@ -7,6 +7,13 @@ and published across LinkedIn, Facebook, X, and Instagram.
 > **▶ Want to run it on your machine? See [RUNNING_LOCALLY.md](./RUNNING_LOCALLY.md)** —
 > with Docker it's a single `docker compose up --build`.
 
+> **🖥️ Windows desktop build:** this `desktop-app` branch packages the app as a
+> standalone Windows app — **SQLite** (via Prisma) instead of Postgres, an
+> **in-process scheduler** instead of Redis/BullMQ, and an **Electron** shell
+> with an **electron-builder NSIS installer**. No Redis, no Docker, no Node
+> install for end users. See **[BUILDING_WINDOWS.md](./BUILDING_WINDOWS.md)**.
+> (The Docker/Postgres instructions below describe the original web variant.)
+
 > Phase 0 scaffold. The full generate → review → schedule → publish loop is
 > implemented. Live publishing is gated on each platform's app approval (see
 > [Platform requirements](#platform-api-requirements)); until then you can fully
@@ -18,7 +25,7 @@ and published across LinkedIn, Facebook, X, and Instagram.
         ┌───────────┐     ┌──────────────┐     ┌───────────┐     ┌───────────┐
 topic ─▶ │ AI drafts │ ──▶ │ Morning      │ ──▶ │ Scheduler │ ──▶ │ Publishers│
         │ (per      │     │ review queue │     │ (BullMQ)  │     │ LI/FB/X/IG│
-        │  platform)│     │ approve/edit │     │           │     │           │
+        │  platform)│     │ approve/edit │     │(in-process)│     │           │
         └───────────┘     └──────────────┘     └───────────┘     └───────────┘
          provider-agnostic   nothing publishes    drips across      refuses to post
          LLM (mock/OpenAI/    without your         your daily        without a real
@@ -31,8 +38,9 @@ is enforced by a state machine in `src/core/review/queue.ts`, not by convention.
 ## Tech stack
 
 - **Next.js 15** (App Router) + React 19 + TypeScript + Tailwind
-- **PostgreSQL** via **Prisma**
-- **Redis + BullMQ** for scheduling/queueing
+- **PostgreSQL** via **Prisma** (web variant) · **SQLite** via Prisma (desktop variant)
+- **Redis + BullMQ** for scheduling (web variant) · **in-process scheduler** (desktop variant)
+- **Electron** + **electron-builder** NSIS installer (desktop variant)
 - **Provider-agnostic LLM** layer (`mock` | `openai` | `anthropic`), no SDK lock-in
 
 ## Project structure
@@ -47,12 +55,13 @@ src/
     review/queue.ts     #   review state machine (the approval guarantee)
     schedule/planner.ts #   slot-based scheduling + next-review window
     devtools/verify.ts  #   runtime smoke test (run via `npm run verify:core`)
-  lib/                  # Integration singletons: db (Prisma), llm, queue (BullMQ)
-  server/               # Server-only: publishers, oauth config, token crypto, services
+  lib/                  # Integration singletons: db (Prisma), llm, queue (in-process scheduler shim), scheduler, serialize
+  server/               # Server-only: publishers, oauth config, token crypto, services, runtime (scheduler handlers)
   app/                  # Next.js routes, server actions, UI
   components/           # Client components (review cards, forms)
-  worker/               # BullMQ worker: publishes scheduled posts
-prisma/                 # schema + seed
+  worker/               # Optional standalone scheduler process (desktop runs it in-process)
+prisma/                 # schema (Postgres) + schema.sqlite.prisma (desktop) + seed
+electron/               # Electron shell: main, preload, SQLite/db bootstrap (desktop)
 ```
 
 The **core is intentionally dependency-free** so the most important business

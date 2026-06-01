@@ -3,6 +3,7 @@
  * metrics and run the dependency-free aggregation in core/analytics.
  */
 import { prisma } from "@/lib/db";
+import { asPlatform } from "@/lib/serialize";
 import {
   dailyTrend,
   summarize,
@@ -47,7 +48,7 @@ export async function getAnalytics(
 
   const records: AnalyticsRecord[] = rows.map((r) => ({
     id: r.id,
-    platform: r.platform,
+    platform: asPlatform(r.platform),
     publishedAt: (r.publishedAt ?? r.createdAt).toISOString(),
     bodyPreview: r.body.length > 140 ? `${r.body.slice(0, 139)}…` : r.body,
     metrics: (r.metrics as unknown as EngagementMetrics | null) ?? null,

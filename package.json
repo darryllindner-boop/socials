@@ -2,8 +2,9 @@
   "name": "social-autopilot",
   "version": "0.1.0",
   "private": true,
-  "description": "Internal autonomous social-media content tool. AI generates drafts -> morning human review/approval -> scheduled publish across LinkedIn, Facebook, X, Instagram.",
+  "description": "Internal autonomous social-media content tool. AI generates drafts -> morning human review/approval -> scheduled publish across LinkedIn, Facebook, X, Instagram. Desktop build: SQLite + in-process scheduler + Electron.",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev",
     "dev:all": "node scripts/dev-all.mjs",
@@ -19,16 +20,19 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "worker": "tsx src/worker/index.ts",
-    "verify:core": "node scripts/verify-core.mjs"
+    "verify:core": "node scripts/verify-core.mjs",
+    "desktop:dev": "node scripts/desktop-dev.mjs",
+    "desktop:assemble": "node scripts/build-desktop.mjs",
+    "desktop:build": "npm run build && npm run desktop:assemble",
+    "desktop:dist": "npm run desktop:build && electron-builder --config electron-builder.yml"
   },
   "prisma": {
+    "schema": "prisma/schema.sqlite.prisma",
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
-    "bullmq": "^5.34.5",
     "dotenv": "^16.4.7",
-    "ioredis": "^5.4.2",
     "next": "^15.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -39,6 +43,8 @@
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.18.0",
     "eslint-config-next": "^15.1.4",
     "postcss": "^8.4.49",

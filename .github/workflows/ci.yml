@@ -9,11 +9,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Dummy values so `prisma generate` and `next build` don't complain.
+      # Dummy SQLite URL so `prisma generate` and `next build` don't complain.
       # No live services are contacted during CI.
-      DATABASE_URL: "postgresql://user:pass@localhost:5432/db?schema=public"
-      REDIS_URL: "redis://localhost:6379"
+      DATABASE_URL: "file:./prisma/dev.db"
       LLM_PROVIDER: "mock"
+      # Don't boot the in-process scheduler during the build.
+      RUN_INPROCESS_SCHEDULER: "0"
+      # CI doesn't run Electron; skip the ~100MB binary download on install.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
 

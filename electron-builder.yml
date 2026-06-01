@@ -1,0 +1,55 @@
+# electron-builder configuration for the Social Autopilot desktop app.
+#
+# Produces a Windows NSIS installer. The actual app payload (the Next.js
+# standalone server + Prisma) is assembled by scripts/build-desktop.mjs into
+# dist-desktop/app and shipped as an unpacked resource (it must stay outside the
+# asar so Node can spawn server.js and Prisma can load its native query engine).
+#
+# Build with:  npm run desktop:dist   (see package.json)
+
+appId: com.socialautopilot.desktop
+productName: Social Autopilot
+copyright: Copyright © Social Autopilot
+
+# Keep the asar tiny: it only needs the Electron entry/preload + manifest. The
+# server and all heavy dependencies live under resources/app (extraResources).
+directories:
+  output: dist-desktop/release
+  buildResources: build
+
+files:
+  - electron/**/*
+  - package.json
+
+# The assembled Next standalone server + Prisma CLI/engines/schema. Copied to
+# resources/app, which electron/db.cjs and electron/main.cjs resolve via
+# process.resourcesPath.
+extraResources:
+  - from: dist-desktop/app
+    to: app
+
+# Prisma ships a platform-native query engine (.node); never compress it.
+asar: true
+asarUnpack:
+  - "**/*.node"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # Provide build/icon.ico to brand the app; electron-builder uses a default
+  # icon if it is absent.
+  artifactName: ${productName}-${version}-Setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Social Autopilot
+
+# (Optional) macOS / Linux targets can be added later; the desktop build is
+# Windows-first per the project requirements.

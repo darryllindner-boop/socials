@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { PLATFORMS, type AutonomyLevel, type Platform } from "@/core/types";
+import { asAutonomy } from "@/lib/serialize";
 import { allPublishers } from "@/server/publishers";
 import { getOAuthAppConfig } from "@/server/oauth-config";
 
@@ -29,12 +30,12 @@ export async function getConnectionStatuses(
 ): Promise<ConnectionStatus[]> {
   let accounts: Array<{
     id: string;
-    platform: Platform;
+    platform: string;
     externalId: string;
     displayName: string;
     accessToken: string | null;
     isActive: boolean;
-    autonomy: AutonomyLevel;
+    autonomy: string;
   }> = [];
   try {
     accounts = await prisma.socialAccount.findMany({
@@ -68,7 +69,7 @@ export async function getConnectionStatuses(
           displayName: a.displayName,
           connected: Boolean(a.accessToken),
           isActive: a.isActive,
-          autonomy: a.autonomy,
+          autonomy: asAutonomy(a.autonomy),
         }),
       );
     return {
